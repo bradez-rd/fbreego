@@ -19,16 +19,14 @@ func TestBenchmarksSmoke(t *testing.T) {
 
 func BenchmarkGenThreadingID(b *testing.B) {
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = utils.GenThreadingID()
 	}
 }
 
 func BenchmarkNextRequestBase36(b *testing.B) {
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = utils.NextRequestBase36()
 	}
 }
@@ -36,8 +34,7 @@ func BenchmarkNextRequestBase36(b *testing.B) {
 func BenchmarkParseFacebookJSON(b *testing.B) {
 	payload := []byte(`for (;;);{"payload":{"actions":[{"message_id":"mid.$123456789","status":"SUCCESS"}]}}`)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = utils.ParseFacebookJSON(payload, true)
 	}
 }
@@ -45,8 +42,7 @@ func BenchmarkParseFacebookJSON(b *testing.B) {
 func BenchmarkRedactSensitive(b *testing.B) {
 	sample := `Header Cookie: c_user=100012345678; xs=secret_token_value_abc; datr=random_datr_123;`
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = logger.RedactSensitive(sample)
 	}
 }
@@ -70,8 +66,7 @@ func BenchmarkSessionStoreSaveAndLoad(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = store.Save(record)
 		_, _ = store.LoadAll()
 	}

@@ -36,6 +36,10 @@ func (s *Server) Routes() http.Handler {
 		JSONResponse(w, code, report)
 	})
 
+	// Documentación OpenAPI y Swagger UI
+	r.Get("/openapi.json", s.ServeOpenAPI)
+	r.Get("/docs", s.ServeSwaggerUI)
+
 	// Endpoint WebSocket con autenticación por ticket o credenciales
 	r.Get("/ws", s.handleWebSocketStream)
 

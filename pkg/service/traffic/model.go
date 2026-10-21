@@ -3,6 +3,7 @@ package traffic
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -31,10 +32,16 @@ type TrafficRecord struct {
 	StatusText           string            `json:"statusText"`
 	DurationMs           int64             `json:"durationMs"`
 	RequestHeaders       map[string]string `json:"requestHeaders"`
+	ReqHeaders           map[string]string `json:"reqHeaders,omitempty"`
 	RequestBody          string            `json:"requestBody"`
+	ReqBody              string            `json:"reqBody,omitempty"`
+	ReqBodySize          int               `json:"reqBodySize,omitempty"`
 	RequestBodyFormatted string            `json:"requestBodyFormatted"`
 	ResponseHeaders      map[string]string `json:"responseHeaders"`
+	RespHeaders          map[string]string `json:"respHeaders,omitempty"`
 	ResponseBody         string            `json:"responseBody"`
+	RespBody             string            `json:"respBody,omitempty"`
+	RespBodySize         int               `json:"respBodySize,omitempty"`
 	ResponseBodyFormat   string            `json:"responseBodyFormatted"`
 	Error                string            `json:"error,omitempty"`
 	CurlCommand          string            `json:"curlCommand"`
@@ -55,13 +62,40 @@ func SanitizeHeaders(headers http.Header) map[string]string {
 	result := make(map[string]string)
 	for k, v := range headers {
 		joined := strings.Join(v, ", ")
-		if strings.EqualFold(k, "cookie") || strings.EqualFold(k, "authorization") {
-			result[k] = logger.RedactSensitive(joined)
+		if isSensitiveHeader(k) {
+			result[k] = "<redacted>"
 		} else {
-			result[k] = joined
+			result[k] = logger.RedactSensitive(joined)
 		}
 	}
 	return result
+}
+
+func isSensitiveHeader(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token":
+		return true
+	default:
+		return false
+	}
+}
+
+// SanitizeURL removes credentials and sensitive query values before persistence.
+func SanitizeURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	parsed.User = nil
+	query := parsed.Query()
+	for key := range query {
+		switch strings.ToLower(key) {
+		case "token", "access_token", "secret", "password", "authorization", "fb_dtsg", "xs", "c_user", "ticket":
+			query.Set(key, "<redacted>")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 // GenerateCurl crea un comando cURL listo para reproducir la petición en terminal.

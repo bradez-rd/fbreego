@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +17,14 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	details := r.URL.Query().Get("details") == "true" || r.URL.Query().Get("details") == "1"
 
 	sessionsList := s.Registry.ListPublic(tenantID, details)
+	for i := range sessionsList {
+		id, _ := sessionsList[i]["sessionId"].(string)
+		if s.ListenerManager != nil {
+			sessionsList[i]["listenerStatus"] = s.ListenerManager.GetStatus(id)
+		} else {
+			sessionsList[i]["listenerStatus"] = "idle"
+		}
+	}
 	JSONSuccess(w, "Sessions retrieved successfully.", sessionsList, http.StatusOK)
 }
 
@@ -35,7 +42,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.RecordAudit("session_create", fmt.Sprintf("Session %s created", rec.SessionID), rec.SessionID)
-	JSONSuccess(w, "Session created and validated successfully.", rec.Public(), http.StatusCreated)
+	s.EventHub.EmitSessionStatus(rec.SessionID, rec.Status, "")
+	pub := rec.Public()
+	pub["listenerStatus"] = "idle"
+	JSONSuccess(w, "Session created and validated successfully.", pub, http.StatusCreated)
 }
 
 func (s *Server) handleGetSessionStatus(w http.ResponseWriter, r *http.Request) {
@@ -46,8 +56,14 @@ func (s *Server) handleGetSessionStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	statusMap := rec.Public()
-	statusMap["isListening"] = s.ListenerManager.IsListening(sessionID)
+	statusMap := rec.Detailed()
+	if s.ListenerManager != nil {
+		statusMap["isListening"] = s.ListenerManager.IsListening(sessionID)
+		statusMap["listenerStatus"] = s.ListenerManager.GetStatus(sessionID)
+	} else {
+		statusMap["isListening"] = false
+		statusMap["listenerStatus"] = "idle"
+	}
 	JSONSuccess(w, "Session status retrieved.", statusMap, http.StatusOK)
 }
 
@@ -61,7 +77,14 @@ func (s *Server) handleValidateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.RecordAudit("session_validate_success", "Session re-validated with Facebook", sessionID)
-	JSONSuccess(w, "Session re-validated successfully.", rec.Public(), http.StatusOK)
+	s.EventHub.EmitSessionStatus(sessionID, rec.Status, "")
+	pub := rec.Public()
+	if s.ListenerManager != nil {
+		pub["listenerStatus"] = s.ListenerManager.GetStatus(sessionID)
+	} else {
+		pub["listenerStatus"] = "idle"
+	}
+	JSONSuccess(w, "Session re-validated successfully.", pub, http.StatusOK)
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +97,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.RecordAudit("session_delete", "Session deleted", sessionID)
+	s.EventHub.EmitSessionStatus(sessionID, "deleted", "")
 	JSONSuccess(w, "Session deleted successfully.", map[string]string{"sessionId": sessionID}, http.StatusOK)
 }
 
@@ -85,16 +109,7 @@ func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.ListenerManager.StartListening(r.Context(), sessionID, func(ctx context.Context) {
-		s.Registry.RecordActivity(sessionID)
-	})
-	if err != nil {
-		JSONError(w, "LISTENER_ALREADY_ACTIVE", err.Error(), http.StatusConflict, nil, "")
-		return
-	}
-
-	s.RecordAudit("listener_start", "Listener started", sessionID)
-	JSONSuccess(w, "Listener started successfully.", map[string]any{"sessionId": rec.SessionID, "status": "listening"}, http.StatusOK)
+	JSONError(w, "LISTENER_NOT_IMPLEMENTED", "The Messenger realtime transport is not available in this build.", http.StatusNotImplemented, map[string]any{"sessionId": rec.SessionID}, "")
 }
 
 func (s *Server) handleStopListening(w http.ResponseWriter, r *http.Request) {

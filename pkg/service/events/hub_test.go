@@ -4,6 +4,17 @@ import (
 	"testing"
 )
 
+type recordingDispatcher struct {
+	eventName string
+	payload   map[string]any
+}
+
+func (d *recordingDispatcher) Enqueue(eventName string, payload map[string]any) bool {
+	d.eventName = eventName
+	d.payload = payload
+	return true
+}
+
 func TestRealtimeHub(t *testing.T) {
 	hub := NewRealtimeHub()
 
@@ -55,5 +66,18 @@ func TestRealtimeHub(t *testing.T) {
 	hub.Unregister(sub1)
 	if hub.ClientCount() != 1 {
 		t.Errorf("expected 1 client after unregistering sub1, got %d", hub.ClientCount())
+	}
+}
+
+func TestRealtimeHubPublishesToDispatcher(t *testing.T) {
+	hub := NewRealtimeHub()
+	dispatcher := &recordingDispatcher{}
+	hub.SetDispatcher(dispatcher)
+	hub.EmitSessionStatus("sess_1", "active", "")
+	if dispatcher.eventName != "session_status" {
+		t.Fatalf("expected session_status dispatch, got %q", dispatcher.eventName)
+	}
+	if dispatcher.payload["sessionId"] != "sess_1" {
+		t.Fatalf("unexpected payload: %v", dispatcher.payload)
 	}
 }

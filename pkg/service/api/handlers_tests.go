@@ -208,7 +208,7 @@ func (s *Server) handleRunE2ETests(w http.ResponseWriter, r *http.Request) {
 			lastMessageID = extractMessageID(res)
 		}
 		if lastMessageID == "" {
-			lastMessageID = fmt.Sprintf("mid.mock_%d", time.Now().UnixMilli())
+			return nil, fmt.Errorf("Facebook no devolvió message_id para el mensaje de prueba")
 		}
 		return map[string]any{
 			"messageId": lastMessageID,
@@ -234,7 +234,7 @@ func (s *Server) handleRunE2ETests(w http.ResponseWriter, r *http.Request) {
 				replyMessageID = extractMessageID(res)
 			}
 			if replyMessageID == "" {
-				replyMessageID = fmt.Sprintf("mid.mock_%d", time.Now().UnixMilli())
+				return nil, fmt.Errorf("Facebook no devolvió message_id para la respuesta de prueba")
 			}
 			return map[string]any{
 				"replyMessageId":   replyMessageID,
@@ -281,18 +281,18 @@ func (s *Server) handleRunE2ETests(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Enviar mensaje referenciando el medio
-			res, err := send.SendText(ctx, s.httpClient, senderRec.ProviderData, types.TextMessageInput{
+			res, err := send.SendWithAttachments(ctx, s.httpClient, senderRec.ProviderData, types.TextMessageInput{
 				ThreadID:   targetID,
 				ThreadType: threadType,
 				Text:       "🧪 [fbreego E2E Test] Mensaje con medio adjunto",
-			})
+			}, []*types.AttachmentResult{up})
 			if err != nil {
 				return nil, err
 			}
 
 			mediaMsgID := extractMessageID(res)
 			if mediaMsgID == "" {
-				mediaMsgID = fmt.Sprintf("mid.mock_%d", time.Now().UnixMilli())
+				return nil, fmt.Errorf("Facebook no devolvió message_id para el mensaje multimedia")
 			}
 
 			return map[string]any{

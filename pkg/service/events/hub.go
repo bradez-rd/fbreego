@@ -16,11 +16,24 @@ type EventSubscriber struct {
 	sessionID string
 }
 
+// EventDispatcher is implemented by asynchronous sinks such as the webhook dispatcher.
+type EventDispatcher interface {
+	Enqueue(eventName string, payload map[string]any) bool
+}
+
 // RealtimeHub coordina la distribución Pub/Sub de eventos a clientes WebSocket conectados.
 type RealtimeHub struct {
 	mu          sync.RWMutex
 	subscribers map[*EventSubscriber]bool
 	totalEvents int64
+	dispatcher  EventDispatcher
+}
+
+// SetDispatcher connects the realtime event source to an asynchronous external sink.
+func (h *RealtimeHub) SetDispatcher(dispatcher EventDispatcher) {
+	h.mu.Lock()
+	h.dispatcher = dispatcher
+	h.mu.Unlock()
 }
 
 // NewRealtimeHub inicializa un nuevo hub de distribución de eventos.
@@ -62,6 +75,16 @@ func (h *RealtimeHub) ClientCount() int {
 	return len(h.subscribers)
 }
 
+// Metrics devuelve estadísticas de clientes y volumen de eventos.
+func (h *RealtimeHub) Metrics() map[string]any {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return map[string]any{
+		"connectedClients": len(h.subscribers),
+		"totalEvents":      h.totalEvents,
+	}
+}
+
 // Broadcast distribuye un evento JSON a todos los clientes suscritos (o filtrados por sessionID si corresponde).
 func (h *RealtimeHub) Broadcast(event map[string]any) {
 	raw, err := json.Marshal(event)
@@ -70,6 +93,10 @@ func (h *RealtimeHub) Broadcast(event map[string]any) {
 	}
 
 	targetSession, _ := event["sessionId"].(string)
+
+	h.mu.Lock()
+	h.totalEvents++
+	h.mu.Unlock()
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -86,10 +113,26 @@ func (h *RealtimeHub) Broadcast(event map[string]any) {
 	}
 }
 
+// Publish sends an event to local WebSocket subscribers and the configured webhook sink.
+func (h *RealtimeHub) Publish(event map[string]any) {
+	h.Broadcast(event)
+	eventName, _ := event["event"].(string)
+	if eventName == "" {
+		return
+	}
+	h.mu.RLock()
+	dispatcher := h.dispatcher
+	h.mu.RUnlock()
+	if dispatcher != nil {
+		dispatcher.Enqueue(eventName, event)
+	}
+}
+
 // EmitSessionStatus emite una actualización de estado de una sesión.
 func (h *RealtimeHub) EmitSessionStatus(sessionID, status, errorMessage string) {
 	evt := map[string]any{
 		"event":     "session_status",
+		"type":      "session_status",
 		"sessionId": sessionID,
 		"status":    status,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -97,7 +140,7 @@ func (h *RealtimeHub) EmitSessionStatus(sessionID, status, errorMessage string) 
 	if errorMessage != "" {
 		evt["error"] = errorMessage
 	}
-	h.Broadcast(evt)
+	h.Publish(evt)
 }
 
 // EmitMessageReceived emite un mensaje entrante decodificado.
@@ -108,7 +151,7 @@ func (h *RealtimeHub) EmitMessageReceived(sessionID string, msg any) {
 		"message":   msg,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	h.Broadcast(evt)
+	h.Publish(evt)
 }
 
 // PumpWrites bombea los mensajes del canal hacia la conexión WebSocket del suscriptor.

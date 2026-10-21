@@ -117,3 +117,35 @@ func TestInboundTrafficMiddleware(t *testing.T) {
 		t.Errorf("unexpected inbound record: %+v", rec)
 	}
 }
+
+func TestOutboundTransportPreservesLargeResponseAndBoundsPreview(t *testing.T) {
+	store := NewTrafficStore(2)
+	large := strings.Repeat("x", bodyPreviewLimit*2)
+	client := &http.Client{Transport: NewTrafficTransport(mockTripper(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(large))}, nil
+	}), store)}
+	resp, err := client.Get("https://www.facebook.com/test")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if string(got) != large {
+		t.Fatalf("instrumentation truncated caller response: got %d want %d", len(got), len(large))
+	}
+	records := store.List(string(DirectionOutbound), "", 1)
+	if len(records) != 1 || len(records[0].ResponseBody) > bodyPreviewLimit+64 {
+		t.Fatalf("stored preview was not bounded: %+v", records)
+	}
+}
+
+func TestSanitizeURLAndHeaders(t *testing.T) {
+	got := SanitizeURL("https://user:pass@example.com/hook?access_token=secret&safe=value")
+	if strings.Contains(got, "pass") || strings.Contains(got, "secret") || !strings.Contains(got, "safe=value") {
+		t.Fatalf("URL was not sanitized correctly: %s", got)
+	}
+	headers := SanitizeHeaders(http.Header{"Authorization": []string{"Bearer secret"}, "Set-Cookie": []string{"session=secret"}})
+	if headers["Authorization"] != "<redacted>" || headers["Set-Cookie"] != "<redacted>" {
+		t.Fatalf("sensitive headers were not fully redacted: %v", headers)
+	}
+}

@@ -12,72 +12,62 @@ import (
 	"github.com/bradez-rd/fbreego/pkg/core/logger"
 )
 
-// TrafficTransport envuelve un http.RoundTripper para interceptar y registrar peticiones salientes a Facebook.
+const bodyPreviewLimit = 64 * 1024
+
+// TrafficTransport wraps outbound requests while retaining only bounded, redacted previews.
 type TrafficTransport struct {
 	base  http.RoundTripper
 	store *TrafficStore
 }
 
-// NewTrafficTransport crea un nuevo transporte instrumentado.
 func NewTrafficTransport(base http.RoundTripper, store *TrafficStore) *TrafficTransport {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return &TrafficTransport{
-		base:  base,
-		store: store,
-	}
+	return &TrafficTransport{base: base, store: store}
 }
 
-// RoundTrip intercepta la petición saliente, registra los datos y devuelve la respuesta intacta al llamador.
 func (t *TrafficTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.store == nil {
 		return t.base.RoundTrip(req)
 	}
 
 	start := time.Now()
-
-	// 1. Clonar el body de la petición
 	var reqBodyBytes []byte
-	if req.Body != nil {
-		var err error
-		reqBodyBytes, err = io.ReadAll(req.Body)
-		if err == nil {
-			req.Body = io.NopCloser(bytes.NewReader(reqBodyBytes))
+	// GetBody provides a separate reader for the common bytes/string reader cases and
+	// avoids consuming a streaming request. Unknown streams are deliberately omitted.
+	if req.GetBody != nil {
+		if body, err := req.GetBody(); err == nil {
+			reqBodyBytes, _ = io.ReadAll(io.LimitReader(body, bodyPreviewLimit+1))
+			_ = body.Close()
 		}
 	}
 
-	// 2. Ejecutar la petición HTTP real
 	resp, reqErr := t.base.RoundTrip(req)
 	duration := time.Since(start).Milliseconds()
-
-	// 3. Procesar datos de la petición
-	rawReqBody := string(reqBodyBytes)
+	rawReqBody := previewString(reqBodyBytes)
 	sanitizedReqBody := logger.RedactSensitive(rawReqBody)
-	formattedReqBody := formatBodyPreview(sanitizedReqBody, req.Header.Get("Content-Type"))
 	sanitizedReqHeaders := SanitizeHeaders(req.Header)
+	sanitizedURL := SanitizeURL(req.URL.String())
 
 	target := "Facebook"
 	if !strings.Contains(req.URL.Host, "facebook.com") {
 		target = req.URL.Host
 	}
-
 	record := &TrafficRecord{
 		Timestamp:            start.UTC().Format(time.RFC3339),
 		Direction:            DirectionOutbound,
 		Target:               target,
 		Method:               req.Method,
-		URL:                  req.URL.String(),
+		URL:                  sanitizedURL,
 		Path:                 req.URL.Path,
 		Host:                 req.URL.Host,
 		DurationMs:           duration,
 		RequestHeaders:       sanitizedReqHeaders,
 		RequestBody:          sanitizedReqBody,
-		RequestBodyFormatted: formattedReqBody,
-		CurlCommand:          GenerateCurl(req.Method, req.URL.String(), sanitizedReqHeaders, sanitizedReqBody),
+		RequestBodyFormatted: formatBodyPreview(sanitizedReqBody, req.Header.Get("Content-Type")),
+		CurlCommand:          GenerateCurl(req.Method, sanitizedURL, sanitizedReqHeaders, sanitizedReqBody),
 	}
-
-	// 4. Si hubo error a nivel de transporte/red
 	if reqErr != nil {
 		record.StatusCode = http.StatusBadGateway
 		record.StatusText = "Network Error"
@@ -86,32 +76,36 @@ func (t *TrafficTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return nil, reqErr
 	}
 
-	// 5. Leer y restaurar el body de respuesta
 	var respBodyBytes []byte
 	if resp.Body != nil {
-		respBodyBytes, _ = io.ReadAll(resp.Body)
-		resp.Body = io.NopCloser(bytes.NewReader(respBodyBytes))
+		respBodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, bodyPreviewLimit+1))
+		resp.Body = &compositeReadCloser{
+			Reader: io.MultiReader(bytes.NewReader(respBodyBytes), resp.Body),
+			Closer: resp.Body,
+		}
 	}
-
 	record.StatusCode = resp.StatusCode
 	record.StatusText = resp.Status
 	record.ResponseHeaders = SanitizeHeaders(resp.Header)
-
-	rawRespBody := string(respBodyBytes)
-	// Truncar respuestas muy grandes para no saturar memoria
-	if len(rawRespBody) > 100*1024 {
-		rawRespBody = rawRespBody[:100*1024] + "... [truncado por tamaño]"
-	}
-
-	sanitizedRespBody := logger.RedactSensitive(rawRespBody)
+	sanitizedRespBody := logger.RedactSensitive(previewString(respBodyBytes))
 	record.ResponseBody = sanitizedRespBody
 	record.ResponseBodyFormat = formatResponseBody(sanitizedRespBody, resp.Header.Get("Content-Type"))
-
 	t.store.Record(record)
 	return resp, nil
 }
 
-// formatBodyPreview intenta estructurar el payload (form-data o json) en formato legible.
+type compositeReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+func previewString(raw []byte) string {
+	if len(raw) <= bodyPreviewLimit {
+		return string(raw)
+	}
+	return string(raw[:bodyPreviewLimit]) + "... [truncated]"
+}
+
 func formatBodyPreview(body, contentType string) string {
 	if body == "" {
 		return ""
@@ -138,7 +132,6 @@ func formatBodyPreview(body, contentType string) string {
 	return body
 }
 
-// formatResponseBody limpia el prefijo de Facebook `for (;;);` e indenta JSON.
 func formatResponseBody(body, contentType string) string {
 	cleaned := CleanFacebookJSON(body)
 	var pretty bytes.Buffer

@@ -33,6 +33,9 @@ func (m *mockRewriteTransport) RoundTrip(req *http.Request) (*http.Response, err
 }
 
 func setupTestServer(t *testing.T) (*httptest.Server, *testutil.MockFacebookServer, func()) {
+	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
+	t.Setenv("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", "1")
+	t.Setenv("FBCHAT_TRAFFIC_ENABLED", "1")
 	tmpDir, err := os.MkdirTemp("", "fbreego_e2e_*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)

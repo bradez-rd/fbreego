@@ -38,11 +38,9 @@ type Dispatcher struct {
 // NewDispatcher crea una nueva instancia del despachador de webhooks.
 func NewDispatcher(store *webhook.WebhookConfigStore) *Dispatcher {
 	return &Dispatcher{
-		store: store,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
-		queue: make(chan WebhookTask, 256),
+		store:  store,
+		client: newSafeHTTPClient(),
+		queue:  make(chan WebhookTask, 256),
 	}
 }
 
@@ -167,7 +165,15 @@ func (d *Dispatcher) deliverWithRetry(ctx context.Context, eventName string, pay
 			lastErr = err
 		}
 
-		time.Sleep(backoff)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 		backoff *= 2
 	}
 

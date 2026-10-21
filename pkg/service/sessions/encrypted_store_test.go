@@ -9,6 +9,7 @@ import (
 )
 
 func TestEncryptedSessionStore_SaveLoadDelete(t *testing.T) {
+	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
 	tempDir, err := os.MkdirTemp("", "fbchat_test_sessions_*")
 	if err != nil {
 		t.Fatalf("error al crear temp dir: %v", err)
@@ -80,5 +81,46 @@ func TestEncryptedSessionStore_SaveLoadDelete(t *testing.T) {
 	}
 	if len(afterDelete) != 0 {
 		t.Errorf("la lista debería estar vacía tras borrar la sesión, obtenidos %d", len(afterDelete))
+	}
+}
+
+func TestEncryptedSessionStoreRequiresSecret(t *testing.T) {
+	t.Setenv("FBCHAT_SESSION_SECRET", "")
+	store := NewEncryptedSessionStore(t.TempDir())
+	if store.Ready() == nil {
+		t.Fatal("expected missing session secret to fail initialization")
+	}
+}
+
+func TestValidateTenantIDRejectsTraversal(t *testing.T) {
+	for _, tenantID := range []string{"..", "../outside", `..\\outside`, "/absolute", "tenant/sub"} {
+		if err := ValidateTenantID(tenantID); err == nil {
+			t.Errorf("expected tenantId %q to be rejected", tenantID)
+		}
+	}
+	for _, tenantID := range []string{"default", "tenant_alpha", "tenant-01", "tenant.example"} {
+		if err := ValidateTenantID(tenantID); err != nil {
+			t.Errorf("expected tenantId %q to be accepted: %v", tenantID, err)
+		}
+	}
+}
+
+func TestSessionRegistryFailsOnCorruptPersistedSession(t *testing.T) {
+	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
+	root := t.TempDir()
+	store := NewEncryptedSessionStore(root)
+	if err := store.Ready(); err != nil {
+		t.Fatal(err)
+	}
+	tenantDir := filepath.Join(root, "default")
+	if err := os.MkdirAll(tenantDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tenantDir, "broken.enc"), []byte("not-encrypted"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewSessionRegistry(store, nil)
+	if registry.Ready() == nil {
+		t.Fatal("expected corrupt persisted session to make registry not ready")
 	}
 }

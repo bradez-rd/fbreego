@@ -16,23 +16,31 @@ import (
 
 var filenameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
+const MaxMediaFileSize int64 = 50 << 20
+
 // MediaRecord contiene los metadatos de un archivo multimedia almacenado localmente.
 type MediaRecord struct {
 	MediaID   string `json:"mediaId"`
 	FileName  string `json:"fileName"`
 	MimeType  string `json:"mimeType"`
 	FileSize  int64  `json:"fileSize"`
+	SizeBytes int64  `json:"sizeBytes"`
 	SHA256    string `json:"sha256"`
 	CreatedAt string `json:"createdAt"`
 }
 
 // Public devuelve un mapa serializable seguro de los metadatos del medio.
 func (r *MediaRecord) Public() map[string]any {
+	size := r.SizeBytes
+	if size == 0 {
+		size = r.FileSize
+	}
 	return map[string]any{
 		"mediaId":   r.MediaID,
 		"fileName":  r.FileName,
 		"mimeType":  r.MimeType,
-		"fileSize":  r.FileSize,
+		"fileSize":  size,
+		"sizeBytes": size,
 		"sha256":    r.SHA256,
 		"createdAt": r.CreatedAt,
 	}
@@ -83,10 +91,13 @@ func (s *MediaStorage) Store(filename, mimeType string, r io.Reader) (*MediaReco
 	defer os.Remove(tempFile.Name())
 
 	tee := io.TeeReader(r, hasher)
-	size, err := io.Copy(tempFile, tee)
+	size, err := io.Copy(tempFile, io.LimitReader(tee, MaxMediaFileSize+1))
 	_ = tempFile.Close()
 	if err != nil {
 		return nil, fmt.Errorf("error al escribir datos del archivo: %w", err)
+	}
+	if size > MaxMediaFileSize {
+		return nil, fmt.Errorf("el archivo excede el límite de %d bytes", MaxMediaFileSize)
 	}
 
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
@@ -103,13 +114,17 @@ func (s *MediaStorage) Store(filename, mimeType string, r io.Reader) (*MediaReco
 	if err := os.Rename(tempFile.Name(), destPath); err != nil {
 		return nil, fmt.Errorf("error al ubicar archivo final: %w", err)
 	}
-	_ = permissions.SetPrivateFilePermissions(destPath)
+	if err := permissions.SetPrivateFilePermissions(destPath); err != nil {
+		_ = os.Remove(destPath)
+		return nil, fmt.Errorf("error al proteger el archivo multimedia: %w", err)
+	}
 
 	record := &MediaRecord{
 		MediaID:   mediaID,
 		FileName:  cleanName,
 		MimeType:  mimeType,
 		FileSize:  size,
+		SizeBytes: size,
 		SHA256:    hashStr,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -160,17 +175,18 @@ func (s *MediaStorage) ListAll(limit int) []map[string]any {
 }
 
 // Delete elimina un medio del registro y del disco.
-func (s *MediaStorage) Delete(mediaID string) bool {
+func (s *MediaStorage) Delete(mediaID string) (bool, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	rec, exists := s.records[mediaID]
 	if !exists {
-		s.mu.Unlock()
-		return false
+		return false, nil
 	}
-	delete(s.records, mediaID)
-	s.mu.Unlock()
 
 	filePath := filepath.Join(s.mediaDir, rec.MediaID+"_"+rec.FileName)
-	_ = os.Remove(filePath)
-	return true
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("error al eliminar archivo multimedia: %w", err)
+	}
+	delete(s.records, mediaID)
+	return true, nil
 }

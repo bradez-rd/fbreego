@@ -62,7 +62,10 @@ func TestMediaStorageSaveAndRetrieve(t *testing.T) {
 	}
 
 	// Delete
-	deleted := storage.Delete(rec1.MediaID)
+	deleted, err := storage.Delete(rec1.MediaID)
+	if err != nil {
+		t.Fatalf("failed to delete media: %v", err)
+	}
 	if !deleted {
 		t.Fatalf("failed to delete media")
 	}

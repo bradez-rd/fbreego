@@ -6,6 +6,7 @@ import (
 )
 
 func TestWebhookConfigStore(t *testing.T) {
+	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
 	tmpDir, err := os.MkdirTemp("", "fbreego_webhook_test_*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)

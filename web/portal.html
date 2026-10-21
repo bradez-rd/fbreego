@@ -266,7 +266,7 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
-    .status-badge.connected, .status-badge.supported, .status-badge.ready {
+    .status-badge.connected, .status-badge.active, .status-badge.supported, .status-badge.ready {
       background: #064e3b;
       color: #6ee7b7;
       border: 1px solid #059669;
@@ -276,12 +276,12 @@
       color: #c4b5fd;
       border: 1px solid #7c3aed;
     }
-    .status-badge.unsupported, .status-badge.expired, .status-badge.error {
+    .status-badge.unsupported, .status-badge.expired, .status-badge.error, .status-badge.not_ready {
       background: #4c0519;
       color: #fda4af;
       border: 1px solid #e11d48;
     }
-    .status-badge.idle { background: #1e293b; color: #94a3b8; }
+    .status-badge.idle, .status-badge.unvalidated, .status-badge.stopped { background: #1e293b; color: #94a3b8; }
 
     /* Form & Inputs */
     label { display: block; font-weight: 600; font-size: 13px; margin: 10px 0 6px; }
@@ -431,12 +431,304 @@
     .test-badge-failed { background: #4c0519; color: #fda4af; border: 1px solid #e11d48; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
-    /* Responsive */
-    @media (max-width: 900px) {
-      .shell { display: block; }
-      .side { border-right: 0; border-bottom: 1px solid var(--line); }
-      .grid-4, .grid-3, .form-grid { grid-template-columns: 1fr; }
-      .main { padding: 20px 16px; }
+    /* Responsive System for Tablets and Mobile Devices */
+    .webhook-events-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .test-suite-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Tablet Breakpoint (max-width: 960px) */
+    @media (max-width: 960px) {
+      .shell {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        width: 100%;
+        overflow-x: hidden;
+      }
+      .side {
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(9, 14, 26, 0.95);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        padding: 12px 16px;
+        gap: 10px;
+      }
+      .brand-group {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0;
+      }
+      .brand-group .tag {
+        display: none;
+      }
+      .side-footer {
+        display: none;
+      }
+      .nav {
+        flex-direction: row;
+        overflow-x: auto;
+        white-space: nowrap;
+        gap: 6px;
+        padding: 2px 0 4px;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .nav::-webkit-scrollbar {
+        display: none;
+      }
+      .nav a {
+        flex-shrink: 0;
+        padding: 7px 12px;
+        font-size: 13px;
+        border-radius: 8px;
+        gap: 6px;
+      }
+      .main {
+        padding: 20px 16px;
+        max-width: 100%;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .grid-4 {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+      .grid-3 {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+      .form-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .test-suite-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .cap-grid {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      }
+      .section-body {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+    }
+
+    /* Mobile Phones Breakpoint (max-width: 600px) */
+    @media (max-width: 600px) {
+      body {
+        font-size: 13px;
+      }
+      .side {
+        padding: 10px 12px;
+        gap: 8px;
+      }
+      .brand {
+        font-size: 17px;
+      }
+      .nav a {
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .main {
+        padding: 14px 12px;
+        gap: 16px;
+      }
+      .top {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        padding-bottom: 12px;
+      }
+      .top h1 {
+        font-size: 20px;
+        word-break: break-word;
+      }
+      .top-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        width: 100%;
+      }
+      .top-actions .pill {
+        width: 100%;
+        justify-content: center;
+        box-sizing: border-box;
+      }
+      .top-actions .btn {
+        flex: 1 1 calc(50% - 6px);
+        justify-content: center;
+        padding: 9px 12px;
+        font-size: 13px;
+      }
+      .grid-4 {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .grid-3, .grid-2, .form-grid, .test-suite-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .webhook-events-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+      .cap-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .card {
+        padding: 14px 16px;
+      }
+      .metric {
+        font-size: 24px;
+        margin: 6px 0 2px;
+      }
+      .section {
+        border-radius: 10px;
+        margin-bottom: 16px;
+      }
+      .section-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
+      }
+      .section-head > div:first-child {
+        width: 100%;
+      }
+      .section-head .actions-row,
+      .section-head .sessions-head-actions,
+      .section-head div[style*="display:flex"] {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .section-head .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+      }
+      .section-body {
+        padding: 14px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      
+      /* Mobile touch & inputs (prevents iOS Safari auto-zoom) */
+      input, select, textarea {
+        font-size: 16px;
+      }
+      textarea {
+        font-size: 13px;
+      }
+
+      /* Specific element overrides on mobile */
+      #tenantFilter {
+        width: 100% !important;
+      }
+      #threadsSessionSelect,
+      #threadsFolderSelect,
+      #contactsSessionSelect {
+        max-width: 100% !important;
+        width: 100% !important;
+      }
+      .webhook-actions {
+        flex-direction: column-reverse;
+      }
+      .webhook-actions .btn {
+        width: 100%;
+        justify-content: center;
+      }
+      #dropZone {
+        padding: 16px 12px !important;
+      }
+
+      /* Tables on mobile: ensure readable columns with touch swipe */
+      table {
+        min-width: 580px;
+      }
+      th, td {
+        padding: 10px 12px;
+      }
+
+      /* Dialogs and Modals on mobile */
+      dialog, #trafficModal {
+        width: calc(100% - 20px) !important;
+        max-width: calc(100% - 20px) !important;
+        margin: 10px auto;
+        border-radius: 12px;
+        max-height: 92vh;
+      }
+      .dialog-head {
+        padding: 14px 16px;
+        font-size: 15px;
+      }
+      .dialog-body {
+        padding: 14px 16px;
+        max-height: calc(88vh - 120px) !important;
+      }
+      .dialog-actions {
+        padding: 12px 16px;
+        flex-direction: column-reverse;
+        gap: 8px;
+      }
+      .dialog-actions .btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      /* Traffic Tab buttons and filter group */
+      .traffic-filter-group,
+      .traffic-modal-tabs {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 4px;
+        width: 100%;
+        scrollbar-width: none;
+      }
+      .traffic-filter-group::-webkit-scrollbar,
+      .traffic-modal-tabs::-webkit-scrollbar {
+        display: none;
+      }
+      .traffic-filter-btn,
+      .traffic-modal-tabs .btn {
+        flex-shrink: 0;
+        font-size: 12px;
+        padding: 6px 10px;
+      }
+
+      /* Toasts on mobile */
+      .toast {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        max-width: calc(100% - 24px);
+        font-size: 12px;
+      }
     }
   </style>
 </head>
@@ -543,7 +835,7 @@
             <h2>Cuentas y Sesiones de Facebook</h2>
             <div class="tag">Aislamiento por tenant y credenciales cifradas en reposo.</div>
           </div>
-          <div style="display:flex; gap:10px;">
+          <div class="sessions-head-actions" style="display:flex; gap:10px; flex-wrap:wrap;">
             <input type="text" id="tenantFilter" placeholder="Filtrar por tenant…" style="width:160px; padding:6px 10px; font-size:12px;">
             <button class="btn" id="newSessionBtn">+ Conectar Cuenta</button>
           </div>
@@ -638,7 +930,7 @@
                   <label for="reactMsgId">Mensaje ID</label>
                   <input id="reactMsgId" placeholder="mid.$..." required>
                   <label for="reactEmoji">Emoji</label>
-                  <div style="display:flex; gap:6px; margin-bottom:8px;">
+                  <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
                     <button type="button" class="btn secondary" style="padding:4px 8px;" onclick="el('reactEmoji').value='👍'">👍</button>
                     <button type="button" class="btn secondary" style="padding:4px 8px;" onclick="el('reactEmoji').value='❤️'">❤️</button>
                     <button type="button" class="btn secondary" style="padding:4px 8px;" onclick="el('reactEmoji').value='😂'">😂</button>
@@ -669,7 +961,7 @@
 
     <!-- VIEW 4: CONTACTOS & BUSCAR -->
     <div id="view-contacts" class="view-content">
-      <div style="display:flex; gap:12px; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap;">
         <label style="margin:0; font-weight:700;">Sesión Activa:</label>
         <select id="contactsSessionSelect" style="max-width:320px;">
           <option value="">Cargando sesiones…</option>
@@ -836,7 +1128,7 @@
               </div>
               <div class="full">
                 <label>Eventos Suscritos</label>
-                <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
+                <div class="webhook-events-grid">
                   <label><input type="checkbox" name="webhookEvent" value="message.received"> message.received</label>
                   <label><input type="checkbox" name="webhookEvent" value="message.sent"> message.sent</label>
                   <label><input type="checkbox" name="webhookEvent" value="message.updated"> message.updated</label>
@@ -848,7 +1140,7 @@
             <div class="notice">
               Los eventos se firman con la cabecera <code>X-Hub-Signature-256</code> y pasan por validación anti-SSRF para proteger hosts internos.
             </div>
-            <div style="margin-top:18px; display:flex; justify-content:space-between;">
+            <div class="webhook-actions" style="margin-top:18px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
               <button type="button" class="btn danger" id="clearWebhookBtn">Borrar Configuración</button>
               <button type="submit" class="btn" id="saveWebhookBtn">Guardar Configuración</button>
             </div>
@@ -990,7 +1282,7 @@
         </div>
 
         <div style="padding:14px 22px; background:#0c1220; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-          <div style="display:flex; gap:6px;">
+          <div class="traffic-filter-group" style="display:flex; gap:6px;">
             <button class="btn secondary traffic-filter-btn active" data-dir="" onclick="setTrafficFilter(this, '')">Todos</button>
             <button class="btn secondary traffic-filter-btn" data-dir="OUTBOUND" onclick="setTrafficFilter(this, 'OUTBOUND')">Salientes FB ↗</button>
             <button class="btn secondary traffic-filter-btn" data-dir="INBOUND" onclick="setTrafficFilter(this, 'INBOUND')">Entrantes API ↘</button>
@@ -1040,7 +1332,7 @@
         </div>
 
         <div class="section-body" style="background:#0c1220;">
-          <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+          <div class="test-suite-grid">
             <!-- Column 1: Sender Session -->
             <div style="background:#080d1a; padding:14px; border-radius:10px; border:1px solid var(--line);">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1185,7 +1477,7 @@
     </div>
 
     <!-- Tab navigation -->
-    <div style="display:flex; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px; flex-wrap:wrap;">
+    <div class="traffic-modal-tabs">
       <button type="button" class="btn secondary traffic-tab-btn active" onclick="switchTrafficTab('curl')">📋 cURL Reproducible</button>
       <button type="button" class="btn secondary traffic-tab-btn" onclick="switchTrafficTab('payload')">📦 Request Payload</button>
       <button type="button" class="btn secondary traffic-tab-btn" onclick="switchTrafficTab('response')">📥 Response Body</button>
@@ -1194,7 +1486,7 @@
 
     <!-- Tab: cURL -->
     <div id="trafficTab-curl" class="traffic-tab-pane">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
         <span class="tag">Comando cURL listo para reproducir en terminal (tokens sensibles enmascarados):</span>
         <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="copyTrafficCurl()">📋 Copiar cURL</button>
       </div>
@@ -1203,7 +1495,7 @@
 
     <!-- Tab: Payload -->
     <div id="trafficTab-payload" class="traffic-tab-pane" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
         <span class="tag">Cuerpo enviado en la petición:</span>
         <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="copyElementText('trafficModalPayload')">📋 Copiar Payload</button>
       </div>
@@ -1212,7 +1504,7 @@
 
     <!-- Tab: Response Body -->
     <div id="trafficTab-response" class="traffic-tab-pane" style="display:none;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
         <span class="tag" id="trafficModalRespTag">Cuerpo de la respuesta:</span>
         <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="copyElementText('trafficModalResponse')">📋 Copiar Respuesta</button>
       </div>
@@ -1270,12 +1562,43 @@ async function request(path, options = {}) {
 }
 
 function escapeHtml(str) {
-  if (!str) return '';
+  if (str === null || str === undefined || str === '' || str === 'undefined' || str === 'null') return '';
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function formatDateTime(val) {
+  if (!val || val === 'undefined' || val === 'null' || val === '—' || val === '-') return '—';
+  let d;
+  if (typeof val === 'number' || (/^\d+$/.test(String(val).trim()))) {
+    const num = Number(val);
+    d = new Date(num < 1e11 ? num * 1000 : num);
+  } else {
+    d = new Date(val);
+  }
+  if (!d || isNaN(d.getTime())) return '—';
+  const dateStr = d.toLocaleDateString();
+  const timeStr = d.toLocaleTimeString();
+  if (dateStr.includes('Invalid') || timeStr.includes('Invalid')) return '—';
+  return `${dateStr} ${timeStr}`;
+}
+
+function formatTime(val) {
+  if (!val || val === 'undefined' || val === 'null' || val === '—' || val === '-') return '—';
+  let d;
+  if (typeof val === 'number' || (/^\d+$/.test(String(val).trim()))) {
+    const num = Number(val);
+    d = new Date(num < 1e11 ? num * 1000 : num);
+  } else {
+    d = new Date(val);
+  }
+  if (!d || isNaN(d.getTime())) return '—';
+  const timeStr = d.toLocaleTimeString();
+  if (timeStr.includes('Invalid')) return '—';
+  return timeStr;
 }
 
 // Navigation handling
@@ -1341,18 +1664,21 @@ async function loadAllData() {
     cachedSessions = sessions;
 
     // Overview metrics
-    el('overviewVersion').textContent = 'v' + info.version;
-    el('overviewService').textContent = info.service;
-    el('overviewSessionCount').textContent = String(sessions.length);
-    el('overviewStorage').textContent = info.sessionStorage === 'encrypted' ? 'Cifrado en reposo' : 'Memoria volátil';
-    el('sideStatusText').innerHTML = `<span class="dot ${status.status === 'connected' ? '' : 'amber'}"></span> ${status.status}`;
+    el('overviewVersion').textContent = 'v' + (info && info.version ? info.version : '1.0.0');
+    el('overviewService').textContent = (info && info.service) ? info.service : 'fbreego';
+    el('overviewSessionCount').textContent = String((sessions || []).length);
+    el('overviewStorage').textContent = (info && info.sessionStorage === 'encrypted') ? 'Cifrado en reposo' : 'Memoria volátil';
+
+    const sStatus = (status && status.status) || (sessions && sessions.length > 0 ? 'connected' : 'idle');
+    el('sideStatusText').innerHTML = `<span class="dot ${sStatus === 'connected' || sStatus === 'active' ? '' : 'amber'}"></span> ${escapeHtml(sStatus)}`;
 
     // Bridge status
-    const bridgeOk = status.readiness === 'ready';
-    el('overviewBridgeStatus').innerHTML = `<span class="status-badge ${bridgeOk ? 'ready' : 'degraded'}">${status.readiness}</span>`;
+    const readiness = (status && status.readiness) || 'ready';
+    const bridgeOk = readiness === 'ready';
+    el('overviewBridgeStatus').innerHTML = `<span class="status-badge ${bridgeOk ? 'ready' : 'degraded'}">${escapeHtml(readiness)}</span>`;
 
     // Capabilities matrix
-    renderCapabilities(info.capabilityMatrix || {});
+    renderCapabilities((info && info.capabilityMatrix) || {});
 
     // Sessions table
     renderSessions(sessions);
@@ -1416,12 +1742,12 @@ function renderSessions(sessions) {
         ${sessions.map(s => `
           <tr>
             <td><span class="pill" style="font-size:11px; padding:3px 8px;">${escapeHtml(s.tenantId || 'default')}</span></td>
-            <td><strong>${escapeHtml(s.label)}</strong></td>
-            <td><code>${s.sessionId.substring(0, 8)}…</code></td>
-            <td><span class="status-badge ${escapeHtml(s.status)}">${escapeHtml(s.status)}</span></td>
+            <td><strong>${escapeHtml(s.label || 'Cuenta')}</strong></td>
+            <td><code>${s.sessionId ? s.sessionId.substring(0, 8) + '…' : '—'}</code></td>
+            <td><span class="status-badge ${escapeHtml(s.status || 'active')}">${escapeHtml(s.status || 'active')}</span></td>
             <td><span class="status-badge ${s.listenerStatus === 'listening' ? 'connected' : (s.listenerStatus === 'error' ? 'error' : 'idle')}">${escapeHtml(s.listenerStatus === 'listening' ? 'ready' : (s.listenerStatus || 'idle'))}</span></td>
-            <td>${s.lastActivityAt ? new Date(s.lastActivityAt).toLocaleTimeString() : '—'}</td>
-            <td>${new Date(s.validatedAt).toLocaleDateString()} ${new Date(s.validatedAt).toLocaleTimeString()}</td>
+            <td>${formatTime(s.lastActivityAt || s.lastActivity)}</td>
+            <td>${formatDateTime(s.validatedAt || s.createdAt)}</td>
             <td>
               <div class="actions-row">
                 <button class="btn secondary" style="padding:4px 8px; font-size:12px;" onclick="validateSession('${s.sessionId}')">Validar</button>
@@ -1438,11 +1764,12 @@ function renderSessions(sessions) {
 }
 
 function renderWebhook(webhook, disp) {
-  el('webhookEnabled').checked = webhook.enabled;
+  webhook = webhook || {};
+  el('webhookEnabled').checked = !!webhook.enabled;
   el('webhookUrl').value = webhook.url || '';
   el('webhookSecret').value = '';
   el('webhookClearSecret').checked = false;
-  el('webhookSecretState').textContent = webhook.secretConfigured ? 'Cifrado con llave Fernet privada' : 'No configurado';
+  el('webhookSecretState').textContent = (webhook.secretConfigured || webhook.hasSecret) ? 'Cifrado con llave secreta' : 'No configurado';
 
   document.querySelectorAll('[name="webhookEvent"]').forEach(input => {
     input.checked = (webhook.events || []).includes(input.value);
@@ -1638,7 +1965,7 @@ async function loadThreads() {
                   <span class="badge" style="${badgeStyle} font-size:10px; text-transform:uppercase; padding:2px 6px; border-radius:4px;">${escapeHtml(t.folder || 'inbox')}</span>
                   ${t.marketplace ? '<span class="badge" style="background:#059669; color:#fff; font-size:10px; padding:2px 6px; border-radius:4px;">Marketplace</span>' : ''}
                 </div>
-                <div class="tag">${t.type} • ID: ${t.threadId}</div>
+                <div class="tag">${escapeHtml(t.type || 'direct')} • ID: ${escapeHtml(t.threadId)}</div>
               </td>
               <td>${t.unreadCount > 0 ? `<span class="badge" style="background:#dc2626; color:white; padding:2px 6px; border-radius:99px; font-size:11px;">${t.unreadCount}</span>` : ''}</td>
               <td><button class="btn secondary" style="padding:4px 8px; font-size:11px;">Elegir</button></td>
@@ -1832,10 +2159,11 @@ async function loadDiagnostics() {
   try {
     const diag = await request('/diagnostics');
     const pill = el('diagReadinessPill');
-    pill.textContent = diag.readiness.status.toUpperCase();
-    pill.className = 'status-badge ' + (diag.readiness.status === 'ready' ? 'ready' : 'degraded');
+    const rStatus = (diag && diag.readiness && diag.readiness.status) || 'ready';
+    pill.textContent = rStatus.toUpperCase();
+    pill.className = 'status-badge ' + (rStatus === 'ready' ? 'ready' : 'degraded');
 
-    const checks = diag.readiness.checks || {};
+    const checks = (diag && diag.readiness && diag.readiness.checks) || {};
     const tbody = el('readinessTableBody');
     tbody.innerHTML = Object.keys(checks).map(name => {
       const c = checks[name];
@@ -1850,13 +2178,13 @@ async function loadDiagnostics() {
     }).join('');
 
     const auditContainer = el('auditLogContainer');
-    const logs = diag.auditLogs || [];
+    const logs = (diag && diag.auditLogs) || [];
     if (!logs.length) {
       auditContainer.innerHTML = '<div class="empty-state">No hay eventos en el buffer de auditoría.</div>';
     } else {
       auditContainer.innerHTML = logs.slice().reverse().map(l => `
         <div style="padding:6px 0; border-bottom:1px solid #141f33;">
-          <span style="color:var(--cyan);">[${new Date().toLocaleTimeString()}]</span>
+          <span style="color:var(--cyan);">[${l.timestamp ? formatTime(l.timestamp) : new Date().toLocaleTimeString()}]</span>
           <span class="status-badge" style="font-size:10px; margin:0 6px;">${escapeHtml(l.type)}</span>
           <span>${escapeHtml(l.details)}</span>
           ${l.sessionId ? `<span style="color:var(--muted); font-size:11px;">(Session: ${l.sessionId.substring(0,8)})</span>` : ''}
@@ -1895,8 +2223,8 @@ async function loadMediaList() {
         <td><code>${escapeHtml(m.mediaId)}</code></td>
         <td><strong>${escapeHtml(m.fileName)}</strong></td>
         <td><span class="pill" style="font-size:11px;">${escapeHtml(m.mimeType)}</span></td>
-        <td>${(m.sizeBytes / 1024).toFixed(1)} KB</td>
-        <td>${new Date(m.createdAt).toLocaleDateString()} ${new Date(m.createdAt).toLocaleTimeString()}</td>
+        <td>${(((m.sizeBytes !== undefined ? m.sizeBytes : m.fileSize) || 0) / 1024).toFixed(1)} KB</td>
+        <td>${formatDateTime(m.createdAt)}</td>
         <td>
           <div class="actions-row">
             <a class="btn secondary" style="padding:4px 8px; font-size:12px; text-decoration:none;" href="/api/v1/media/${encodeURIComponent(m.mediaId)}" target="_blank">Ver</a>
@@ -2012,7 +2340,7 @@ async function initRealtimeWebSocket() {
       try {
         const data = JSON.parse(event.data);
         appendRealtimeEvent(data);
-        if (data.event === 'session.status') {
+        if (data.event === 'session.status' || data.event === 'session_status') {
           loadAllData();
         }
       } catch (e) {
@@ -2187,7 +2515,7 @@ async function loadTraffic() {
         : `<span class="status-badge ready">${r.statusCode || '200'}</span>`;
 
       const durText = r.durationMs >= 1000 ? (r.durationMs / 1000).toFixed(2) + 's' : (r.durationMs + 'ms');
-      const timeStr = r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : '-';
+      const timeStr = formatTime(r.timestamp);
 
       let displayUrl = r.url || '';
       let urlTooltip = escapeHtml(r.url || '');
@@ -2253,14 +2581,16 @@ function inspectTrafficRecord(id) {
 
   el('trafficModalUrl').textContent = rec.url || '-';
   el('trafficModalDuration').textContent = `${rec.durationMs || 0} ms (${rec.duration || '-'})`;
-  el('trafficModalTime').textContent = rec.timestamp ? new Date(rec.timestamp).toLocaleString() : '-';
-  el('trafficModalSize').textContent = `Req: ${rec.reqBodySize || 0} B / Resp: ${rec.respBodySize || 0} B`;
+  el('trafficModalTime').textContent = formatDateTime(rec.timestamp);
+  const reqSize = rec.reqBodySize ?? (rec.requestBody ? rec.requestBody.length : (rec.reqBody ? rec.reqBody.length : 0));
+  const respSize = rec.respBodySize ?? (rec.responseBody ? rec.responseBody.length : (rec.respBody ? rec.respBody.length : 0));
+  el('trafficModalSize').textContent = `Req: ${reqSize} B / Resp: ${respSize} B`;
 
   // cURL
   el('trafficModalCurl').textContent = rec.curlCommand || '(cURL no disponible)';
 
   // Payload
-  let payloadText = rec.reqBody || '';
+  let payloadText = rec.reqBody || rec.requestBody || '';
   if (payloadText) {
     try {
       const parsed = JSON.parse(payloadText);
@@ -2272,14 +2602,14 @@ function inspectTrafficRecord(id) {
   }
 
   // Response Body
-  let respText = rec.respBodyClean || rec.respBody || '';
+  let respText = rec.respBodyClean || rec.respBody || rec.responseBody || '';
   if (respText) {
     try {
       const parsed = JSON.parse(respText);
       respText = JSON.stringify(parsed, null, 2);
     } catch (e) {}
     el('trafficModalResponse').textContent = respText;
-    if (rec.respBodyClean && rec.respBodyClean !== rec.respBody) {
+    if (rec.respBodyClean && rec.respBodyClean !== (rec.respBody || rec.responseBody)) {
       el('trafficModalRespTag').textContent = 'Cuerpo de la respuesta (Prefijo "for (;;);" de Facebook removido para legibilidad):';
     } else {
       el('trafficModalRespTag').textContent = 'Cuerpo de la respuesta:';
@@ -2300,8 +2630,8 @@ function inspectTrafficRecord(id) {
       .join('\n');
   }
 
-  el('trafficModalReqHeaders').textContent = formatHeaders(rec.reqHeaders);
-  el('trafficModalRespHeaders').textContent = formatHeaders(rec.respHeaders);
+  el('trafficModalReqHeaders').textContent = formatHeaders(rec.reqHeaders || rec.requestHeaders);
+  el('trafficModalRespHeaders').textContent = formatHeaders(rec.respHeaders || rec.responseHeaders);
 
   switchTrafficTab('curl');
   el('trafficModal').showModal();
@@ -2636,11 +2966,11 @@ function renderTestCards() {
   container.innerHTML = TEST_DEFINITIONS.map(t => `
     <div class="test-card" id="testCard_${t.id}">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <span style="font-weight:800; font-size:14px; color:var(--text); width:24px;">#${t.num}</span>
           <span class="status-badge badge-method-${t.method.toLowerCase()}" style="font-size:10px; padding:2px 7px;">${t.method}</span>
           <strong style="font-size:13px;">${escapeHtml(t.title)}</strong>
-          <code style="font-size:11px; color:var(--muted);">${escapeHtml(t.endpoint)}</code>
+          <code style="font-size:11px; color:var(--muted); word-break:break-all;">${escapeHtml(t.endpoint)}</code>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
           <span class="status-badge test-badge-idle" id="testBadge_${t.id}">IDLE</span>

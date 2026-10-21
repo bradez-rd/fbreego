@@ -8,16 +8,18 @@ import (
 
 // SessionRecord representa el estado y credenciales completas de una sesión administrada.
 type SessionRecord struct {
-	SessionID    string                  `json:"sessionId"`
-	Label        string                  `json:"label"`
-	TenantID     string                  `json:"tenantId"`
-	Cookies      []types.CookieInput     `json:"cookies,omitempty"`
-	FacebookID   string                  `json:"facebookId"`
-	Status       string                  `json:"status"` // "active", "error", "unvalidated", "stopped"
-	CreatedAt    string                  `json:"createdAt"`
-	LastActivity string                  `json:"lastActivity"`
-	LastError    string                  `json:"lastError,omitempty"`
-	ProviderData *types.DataFB           `json:"providerData,omitempty"`
+	SessionID      string              `json:"sessionId"`
+	Label          string              `json:"label"`
+	TenantID       string              `json:"tenantId"`
+	Cookies        []types.CookieInput `json:"cookies,omitempty"`
+	FacebookID     string              `json:"facebookId"`
+	Status         string              `json:"status"` // "active", "error", "unvalidated", "stopped"
+	CreatedAt      string              `json:"createdAt"`
+	ValidatedAt    string              `json:"validatedAt"`
+	LastActivityAt string              `json:"lastActivityAt"`
+	LastActivity   string              `json:"lastActivity,omitempty"`
+	LastError      string              `json:"lastError,omitempty"`
+	ProviderData   *types.DataFB       `json:"providerData,omitempty"`
 }
 
 // BuildCookieHeader concatena las cookies del registro en una cabecera HTTP estándar.
@@ -36,15 +38,25 @@ func (r *SessionRecord) BuildCookieHeader() string {
 
 // Public devuelve un mapa seguro para el consumidor externo sin exponer cookies ni tokens.
 func (r *SessionRecord) Public() map[string]any {
+	lastAct := r.LastActivityAt
+	if lastAct == "" {
+		lastAct = r.LastActivity
+	}
+	valAt := r.ValidatedAt
+	if valAt == "" {
+		valAt = r.CreatedAt
+	}
 	return map[string]any{
-		"sessionId":    r.SessionID,
-		"label":        r.Label,
-		"tenantId":     r.TenantID,
-		"status":       r.Status,
-		"createdAt":    r.CreatedAt,
-		"lastActivity": r.LastActivity,
-		"lastError":    r.LastError,
-		"facebookId":   r.FacebookID,
+		"sessionId":      r.SessionID,
+		"label":          r.Label,
+		"tenantId":       r.TenantID,
+		"status":         r.Status,
+		"createdAt":      r.CreatedAt,
+		"validatedAt":    valAt,
+		"lastActivityAt": lastAct,
+		"lastActivity":   lastAct,
+		"lastError":      r.LastError,
+		"facebookId":     r.FacebookID,
 	}
 }
 

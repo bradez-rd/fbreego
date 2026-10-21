@@ -2,53 +2,40 @@ package e2ee
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
 
-// ProtocolManager coordina el motor de cifrado E2EE nativo o el puente retrocompatible.
+var ErrProtocolUnavailable = errors.New("el protocolo E2EE no está disponible en esta compilación")
+
+// ProtocolManager exposes the E2EE facade without claiming a backend exists.
 type ProtocolManager struct {
 	mu          sync.RWMutex
 	initialized bool
 	actions     *BridgeActions
 }
 
-// NewProtocolManager inicializa el gestor de protocolo E2EE.
 func NewProtocolManager() *ProtocolManager {
 	mgr := &ProtocolManager{}
 	mgr.actions = NewBridgeActions(mgr)
 	return mgr
 }
 
-// Actions devuelve la fachada de acciones de mensajería E2EE.
-func (p *ProtocolManager) Actions() *BridgeActions {
-	return p.actions
-}
+func (p *ProtocolManager) Actions() *BridgeActions { return p.actions }
 
-// Call implementa la interfaz RPCCaller para despachar métodos RPC.
+// Available reports whether a real protocol backend has been configured.
+func (p *ProtocolManager) Available() bool { return false }
+
 func (p *ProtocolManager) Call(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
-
-	// Ejecución controlada del método
-	switch method {
-	case "editMessage", "unsendMessage", "editE2EEMessage", "unsendE2EEMessage",
-		"sendTypingIndicator", "sendE2EETyping", "markRead", "sendE2EEAudio",
-		"sendE2EEImage", "downloadMedia", "downloadE2EEMedia":
-		return map[string]any{
-			"status":  "success",
-			"method":  method,
-			"payload": params,
-		}, nil
-	default:
-		return nil, fmt.Errorf("método RPC no reconocido: %s", method)
-	}
+	return nil, fmt.Errorf("%w: %s", ErrProtocolUnavailable, method)
 }
 
-// Close finaliza el motor del protocolo.
 func (p *ProtocolManager) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

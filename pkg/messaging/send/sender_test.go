@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/bradez-rd/fbreego/pkg/core/types"
@@ -104,5 +105,33 @@ func TestSendTextGroup(t *testing.T) {
 	}
 	if res == nil {
 		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestSendWithAttachmentsBindsUploadedIDs(t *testing.T) {
+	mockResponse := `for (;;);{"payload":{"actions":[{"message_id":"mid.$media"}]}}`
+	client := &http.Client{Transport: mockTripper(func(req *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(req.Body)
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		if values.Get("has_attachment") != "true" {
+			t.Errorf("expected has_attachment=true, got %q", values.Get("has_attachment"))
+		}
+		if values.Get("image_ids[0]") != "img_123" || values.Get("file_ids[0]") != "file_456" {
+			t.Errorf("attachment IDs not bound to message: %v", values)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewBufferString(mockResponse)), Header: make(http.Header)}, nil
+	})}
+
+	_, err := SendWithAttachments(context.Background(), client, &types.DataFB{FacebookID: "1000111"}, types.TextMessageInput{
+		ThreadID: "1000999", ThreadType: "user", Text: "caption",
+	}, []*types.AttachmentResult{
+		{AttachmentID: "img_123", AttachmentType: "image"},
+		{AttachmentID: "file_456", AttachmentType: "file"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

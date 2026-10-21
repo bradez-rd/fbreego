@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
@@ -18,7 +19,9 @@ func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(CORSMiddleware)
-	r.Use(traffic.InboundTrafficMiddleware(s.TrafficStore))
+	if s.TrafficEnabled {
+		r.Use(traffic.InboundTrafficMiddleware(s.TrafficStore))
+	}
 
 	// Endpoints públicos de observabilidad
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -58,14 +61,83 @@ func (s *Server) Routes() http.Handler {
 
 		// Información y diagnóstico de la aplicación
 		pr.Get("/api/v1/app/info", func(w http.ResponseWriter, r *http.Request) {
+			auth := currentAuthConfiguration()
+			storageType := "memory"
+			if s.Registry != nil && s.Registry.HasEncryptedStorage() {
+				storageType = "encrypted"
+			}
 			JSONSuccess(w, "App info retrieved.", map[string]any{
-				"service": ServiceName,
-				"version": Version,
+				"service":        ServiceName,
+				"version":        Version,
+				"apiVersion":     "v1",
+				"sessionStorage": storageType,
 				"auth": map[string]any{
-					"required": os.Getenv("FBCHAT_API_AUTH_REQUIRED") != "0",
+					"required":   auth.Required,
+					"configured": auth.Configured,
 				},
 				"bridge": map[string]any{
-					"ready": true,
+					"ready": false,
+				},
+				"capabilities": []string{
+					"sessions",
+					"session-validation",
+					"session-listeners",
+					"global-webhook-config",
+					"webhook-dispatcher",
+					"websocket-events",
+					"media-upload",
+					"media-send",
+					"threads",
+					"text-messages",
+					"reactions",
+					"unsend",
+					"user-info",
+					"search",
+					"blocking",
+					"marketplace-read",
+					"traffic-inspection",
+				},
+				"capabilityMatrix": map[string]any{
+					"messenger.send": map[string]string{
+						"status":      "supported",
+						"description": "Send text & replies to users and groups",
+					},
+					"messenger.receive": map[string]string{
+						"status":      "supported",
+						"description": "Webhook ingestion for messages & sessions",
+					},
+					"messenger.threads": map[string]string{
+						"status":      "supported",
+						"description": "Sanitized conversation listing",
+					},
+					"messenger.reactions": map[string]string{
+						"status":      "supported",
+						"description": "Add and remove emoji reactions",
+					},
+					"messenger.unsend": map[string]string{
+						"status":      "supported",
+						"description": "Revoke sent messages",
+					},
+					"messenger.users": map[string]string{
+						"status":      "supported",
+						"description": "Lookup sanitized profile",
+					},
+					"messenger.blocking": map[string]string{
+						"status":      "supported",
+						"description": "Block and unblock Facebook contacts",
+					},
+					"messenger.attachments": map[string]string{
+						"status":      "supported",
+						"description": "Upload and dispatch staged multimedia",
+					},
+					"marketplace.read": map[string]string{
+						"status":      "supported",
+						"description": "Fetch public Marketplace listings",
+					},
+					"traffic.inspector": map[string]string{
+						"status":      "supported",
+						"description": "Realtime HTTP traffic debugging & cURL export",
+					},
 				},
 			}, http.StatusOK)
 		})
@@ -74,14 +146,42 @@ func (s *Server) Routes() http.Handler {
 			total := s.Registry.Count()
 			active := 0
 			for _, item := range s.Registry.ListPublic("", false) {
-				if item["status"] == "active" {
+				st, _ := item["status"].(string)
+				if st == "active" || st == "connected" {
 					active++
 				}
 			}
+			rep := s.ReadinessReport()
+			readinessStatus, _ := rep["status"].(string)
+			if readinessStatus == "" {
+				readinessStatus = "ready"
+			}
+			statusStr := "idle"
+			if total > 0 {
+				statusStr = "connected"
+			}
+			var dispStats map[string]any
+			if s.Dispatcher != nil {
+				dispStats = s.Dispatcher.Stats()
+			}
+			var hubMetrics map[string]any
+			if s.EventHub != nil {
+				hubMetrics = s.EventHub.Metrics()
+			}
+			clientCount := 0
+			if s.EventHub != nil {
+				clientCount = s.EventHub.ClientCount()
+			}
 			JSONSuccess(w, "App status retrieved.", map[string]any{
+				"status":         statusStr,
+				"service":        ServiceName,
+				"version":        Version,
 				"totalSessions":  total,
 				"activeSessions": active,
-				"wsClients":      s.EventHub.ClientCount(),
+				"readiness":      readinessStatus,
+				"dispatcher":     dispStats,
+				"eventHub":       hubMetrics,
+				"wsClients":      clientCount,
 			}, http.StatusOK)
 		})
 
@@ -91,17 +191,29 @@ func (s *Server) Routes() http.Handler {
 			copy(logsCopy, s.auditLogs)
 			s.auditMu.Unlock()
 
+			var dispStats map[string]any
+			if s.Dispatcher != nil {
+				dispStats = s.Dispatcher.Stats()
+			}
+			var hubMetrics map[string]any
+			if s.EventHub != nil {
+				hubMetrics = s.EventHub.Metrics()
+			}
+
 			JSONSuccess(w, "Diagnostics retrieved.", map[string]any{
-				"service":    ServiceName,
-				"version":    Version,
-				"auditLogs":  logsCopy,
-				"dispatcher": s.Dispatcher.Stats(),
+				"service":         ServiceName,
+				"version":         Version,
+				"readiness":       s.ReadinessReport(),
+				"sessionsCount":   s.Registry.Count(),
+				"auditLogs":       logsCopy,
+				"dispatcher":      dispStats,
+				"dispatcherStats": dispStats,
+				"eventHub":        hubMetrics,
 			}, http.StatusOK)
 		})
 
 		// Emisión de ticket efímero para WebSocket
 		pr.Post("/api/v1/websocket-ticket", func(w http.ResponseWriter, r *http.Request) {
-			ticket := s.IssueWebSocketTicket()
 			var body map[string]any
 			if r.Body != nil {
 				_ = json.NewDecoder(r.Body).Decode(&body)
@@ -110,6 +222,7 @@ func (s *Server) Routes() http.Handler {
 			if sessionID == "" {
 				sessionID = r.URL.Query().Get("sessionId")
 			}
+			ticket := s.IssueWebSocketTicket(sessionID)
 
 			JSONSuccess(w, "One-time WebSocket ticket created.", map[string]any{
 				"ticket":    ticket,
@@ -165,28 +278,31 @@ func (s *Server) Routes() http.Handler {
 		pr.Delete("/api/v1/traffic", s.handleClearTraffic)
 
 		// Suite de Tests E2E entre Sesiones y APIs
-		pr.Post("/api/v1/tests/e2e", s.handleRunE2ETests)
+		if envFlag("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", false) {
+			pr.Post("/api/v1/tests/e2e", s.handleRunE2ETests)
+		}
 	})
 
 	return r
 }
 
 func (s *Server) handleWebSocketStream(w http.ResponseWriter, r *http.Request) {
-	reqAuth := os.Getenv("FBCHAT_API_AUTH_REQUIRED") != "0"
+	auth := currentAuthConfiguration()
 	ticket := r.URL.Query().Get("ticket")
-	token := r.URL.Query().Get("token")
 	sessionID := r.URL.Query().Get("sessionId")
 
-	if reqAuth {
+	if auth.Required {
+		if !auth.Configured {
+			JSONError(w, "AUTH_NOT_CONFIGURED", "API authentication is required but credentials are not configured.", http.StatusServiceUnavailable, nil, "")
+			return
+		}
 		authenticated := false
-		if s.ConsumeWebSocketTicket(ticket) {
-			authenticated = true
-		} else if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(os.Getenv("FBCHAT_API_PASSWORD"))) == 1 {
+		if s.ConsumeWebSocketTicket(ticket, sessionID) {
 			authenticated = true
 		} else {
 			user, pass, ok := r.BasicAuth()
-			if ok && subtle.ConstantTimeCompare([]byte(user), []byte(os.Getenv("FBCHAT_API_USERNAME"))) == 1 &&
-				subtle.ConstantTimeCompare([]byte(pass), []byte(os.Getenv("FBCHAT_API_PASSWORD"))) == 1 {
+			if ok && subtle.ConstantTimeCompare([]byte(user), []byte(auth.Username)) == 1 &&
+				subtle.ConstantTimeCompare([]byte(pass), []byte(auth.Password)) == 1 {
 				authenticated = true
 			}
 		}
@@ -197,9 +313,13 @@ func (s *Server) handleWebSocketStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	opts := &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+	var originPatterns []string
+	for _, origin := range strings.Split(strings.TrimSpace(os.Getenv("FBCHAT_API_WS_ORIGINS")), ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			originPatterns = append(originPatterns, origin)
+		}
 	}
+	opts := &websocket.AcceptOptions{OriginPatterns: originPatterns}
 	ws, err := websocket.Accept(w, r, opts)
 	if err != nil {
 		return

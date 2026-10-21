@@ -25,6 +25,16 @@ func TestRedactSensitive(t *testing.T) {
 			input:    "Listening on :8000 successfully",
 			expected: "Listening on :8000 successfully",
 		},
+		{
+			name:     "Redact cookie collection value",
+			input:    `{"cookies":[{"name":"xs","value":"session-secret"},{"name":"locale","value":"es_ES"}]}`,
+			expected: `{"cookies":[{"name":"xs","value":"<redacted>"},{"name":"locale","value":"es_ES"}]}`,
+		},
+		{
+			name:     "Redact interpolated-style plain secret",
+			input:    "request failed password: my_pass",
+			expected: "request failed password: <redacted>",
+		},
 	}
 
 	for _, tc := range tests {

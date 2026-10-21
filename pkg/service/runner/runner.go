@@ -77,14 +77,30 @@ func Run() {
 
 	stateDir := *sessionsFlag
 	mediaDir := *mediaFlag
+	if err := api.ValidateRuntimeConfiguration(); err != nil {
+		logger.Error("Configuración insegura de API: %v", err)
+		os.Exit(1)
+	}
 
 	encStore := sessions.NewEncryptedSessionStore(stateDir)
 	webhookStore := webhook.NewWebhookConfigStore(stateDir)
+	if err := encStore.Ready(); err != nil {
+		logger.Error("Configuración insegura del almacén de sesiones: %v", err)
+		os.Exit(1)
+	}
+	if err := webhookStore.Ready(); err != nil {
+		logger.Error("Configuración insegura del almacén de webhook: %v", err)
+		os.Exit(1)
+	}
 	webhookDisp := dispatcher.NewDispatcher(webhookStore)
 	eventHub := events.NewRealtimeHub()
 	listenerMgr := events.NewSessionListenerManager(eventHub)
 	mediaStore := media.NewMediaStorage(mediaDir)
 	sessionReg := sessions.NewSessionRegistry(encStore, nil)
+	if err := sessionReg.Ready(); err != nil {
+		logger.Error("No se pudieron cargar las sesiones cifradas: %v", err)
+		os.Exit(1)
+	}
 
 	server := api.NewServer(
 		sessionReg,

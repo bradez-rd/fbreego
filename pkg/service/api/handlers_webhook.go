@@ -30,7 +30,11 @@ func (s *Server) handleUpdateWebhookConfig(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleClearWebhookConfig(w http.ResponseWriter, r *http.Request) {
-	cleared := s.WebhookStore.Clear()
+	cleared, err := s.WebhookStore.Clear()
+	if err != nil {
+		JSONError(w, "WEBHOOK_CLEAR_FAILED", err.Error(), http.StatusInternalServerError, nil, "")
+		return
+	}
 	s.RecordAudit("webhook_clear", "Webhook configuration cleared", "")
 	JSONSuccess(w, "Webhook configuration cleared.", cleared, http.StatusOK)
 }

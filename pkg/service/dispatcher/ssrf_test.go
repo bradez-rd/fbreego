@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"context"
 	"testing"
 )
 
@@ -18,6 +19,9 @@ func TestIsSSRFRisk(t *testing.T) {
 		{"http://[::1]:8080/", true},                       // IPv6 loopback
 		{"http://0.0.0.0:8000/", true},
 		{"invalid://url", true},
+		{"file:///etc/passwd", true},
+		{"ftp://example.com/file", true},
+		{"https://example.com:8443/hook", true},
 	}
 
 	for _, tt := range tests {
@@ -27,5 +31,11 @@ func TestIsSSRFRisk(t *testing.T) {
 				t.Errorf("IsSSRFRisk(%q) = %v, want %v", tt.url, got, tt.wantRisk)
 			}
 		})
+	}
+}
+
+func TestSafeDialRejectsPrivateAddress(t *testing.T) {
+	if _, err := safeDialContext(context.Background(), "tcp", "127.0.0.1:8080"); err == nil {
+		t.Fatal("expected private dial target to be rejected")
 	}
 }

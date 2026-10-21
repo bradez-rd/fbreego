@@ -19,11 +19,15 @@ import (
 )
 
 var allowedEvents = map[string]bool{
-	"message":        true,
-	"session_status": true,
-	"reaction":       true,
-	"error":          true,
-	"raw_event":      true,
+	"message":          true,
+	"message_sent":     true,
+	"message_received": true,
+	"session_status":   true,
+	"reaction":         true,
+	"reaction_updated": true,
+	"message_unsent":   true,
+	"error":            true,
+	"raw_event":        true,
 }
 
 // WebhookConfig representa la configuración persistida del webhook global.
@@ -37,12 +41,14 @@ type WebhookConfig struct {
 
 // Public devuelve un mapa seguro sin exponer el secreto HMAC completo.
 func (c *WebhookConfig) Public() map[string]any {
+	hasSec := strings.TrimSpace(c.Secret) != ""
 	return map[string]any{
-		"enabled":   c.Enabled,
-		"url":       c.URL,
-		"events":    c.Events,
-		"hasSecret": strings.TrimSpace(c.Secret) != "",
-		"updatedAt": c.UpdatedAt,
+		"enabled":          c.Enabled,
+		"url":              c.URL,
+		"events":           c.Events,
+		"hasSecret":        hasSec,
+		"secretConfigured": hasSec,
+		"updatedAt":        c.UpdatedAt,
 	}
 }
 
@@ -52,6 +58,7 @@ type WebhookConfigStore struct {
 	stateDir string
 	key      []byte
 	cached   *WebhookConfig
+	initErr  error
 }
 
 // NewWebhookConfigStore crea una nueva instancia del almacén de configuración de webhook.
@@ -59,29 +66,47 @@ func NewWebhookConfigStore(stateDir string) *WebhookConfigStore {
 	if stateDir == "" {
 		stateDir = ".fbchat_sessions"
 	}
-	secret := os.Getenv("FBCHAT_SESSION_SECRET")
-	if secret == "" {
-		secret = "fbchat-default-development-secret-key-change-in-production"
+	store := &WebhookConfigStore{stateDir: stateDir}
+	secret := strings.TrimSpace(os.Getenv("FBCHAT_SESSION_SECRET"))
+	if len(secret) < 32 {
+		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET debe contener al menos 32 caracteres")
+		store.cached = &WebhookConfig{Enabled: false, Events: []string{}}
+		return store
 	}
 	hash := sha256.Sum256([]byte(secret))
+	store.key = hash[:]
 
-	_ = os.MkdirAll(stateDir, 0700)
-	_ = permissions.SetPrivateFilePermissions(stateDir)
-
-	store := &WebhookConfigStore{
-		stateDir: stateDir,
-		key:      hash[:],
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		store.initErr = fmt.Errorf("no se pudo crear el directorio de webhook: %w", err)
+		return store
 	}
-	_ = store.load()
+	if err := permissions.SetPrivateFilePermissions(stateDir); err != nil {
+		store.initErr = fmt.Errorf("no se pudo proteger el directorio de webhook: %w", err)
+		return store
+	}
+	if err := store.load(); err != nil {
+		store.initErr = err
+	}
 	return store
+}
+
+// Ready reports whether encrypted webhook persistence was initialized safely.
+func (s *WebhookConfigStore) Ready() error {
+	if s == nil {
+		return fmt.Errorf("almacén de webhook no configurado")
+	}
+	return s.initErr
 }
 
 func (s *WebhookConfigStore) load() error {
 	path := filepath.Join(s.stateDir, "webhook_config.enc")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		s.cached = &WebhookConfig{Enabled: false, Events: []string{}}
-		return nil
+		if os.IsNotExist(err) {
+			s.cached = &WebhookConfig{Enabled: false, Events: []string{}}
+			return nil
+		}
+		return fmt.Errorf("no se pudo leer la configuración de webhook: %w", err)
 	}
 
 	block, err := aes.NewCipher(s.key)
@@ -130,6 +155,9 @@ func (s *WebhookConfigStore) GetPublic() map[string]any {
 func (s *WebhookConfigStore) Update(enabled bool, targetURL string, events []string, secret *string, clearSecret bool) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.Ready(); err != nil {
+		return nil, err
+	}
 
 	targetURL = strings.TrimSpace(targetURL)
 	if enabled && targetURL == "" {
@@ -191,19 +219,23 @@ func (s *WebhookConfigStore) Update(enabled bool, targetURL string, events []str
 	if err := os.WriteFile(temp, encrypted, 0600); err != nil {
 		return nil, err
 	}
-	_ = permissions.SetPrivateFilePermissions(temp)
+	if err := permissions.SetPrivateFilePermissions(temp); err != nil {
+		_ = os.Remove(temp)
+		return nil, err
+	}
 	if err := os.Rename(temp, dest); err != nil {
 		_ = os.Remove(temp)
 		return nil, err
 	}
-	_ = permissions.SetPrivateFilePermissions(dest)
+	if err := permissions.SetPrivateFilePermissions(dest); err != nil {
+		return nil, err
+	}
 
 	s.cached = newConfig
 	return newConfig.Public(), nil
 }
 
 // Clear borra la configuración persistida de webhook.
-func (s *WebhookConfigStore) Clear() map[string]any {
-	res, _ := s.Update(false, "", []string{}, nil, true)
-	return res
+func (s *WebhookConfigStore) Clear() (map[string]any, error) {
+	return s.Update(false, "", []string{}, nil, true)
 }

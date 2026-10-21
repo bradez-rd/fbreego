@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ type SessionRegistry struct {
 	sessions   map[string]*SessionRecord
 	storage    *EncryptedSessionStore
 	httpClient *http.Client
+	initErr    error
 }
 
 // NewSessionRegistry inicializa un nuevo registro de sesiones, cargando las sesiones guardadas si el store está presente.
@@ -33,14 +35,46 @@ func NewSessionRegistry(store *EncryptedSessionStore, httpClient *http.Client) *
 
 	if store != nil {
 		loaded, err := store.LoadAll()
-		if err == nil {
+		if err != nil {
+			reg.initErr = err
+		} else {
 			for _, rec := range loaded {
+				if rec.ValidatedAt == "" {
+					rec.ValidatedAt = rec.CreatedAt
+				}
+				if rec.LastActivityAt == "" {
+					rec.LastActivityAt = rec.LastActivity
+				}
+				if rec.LastActivityAt == "" {
+					rec.LastActivityAt = rec.CreatedAt
+				}
+				if rec.LastActivity == "" {
+					rec.LastActivity = rec.LastActivityAt
+				}
 				reg.sessions[rec.SessionID] = rec
 			}
 		}
 	}
 
 	return reg
+}
+
+// Ready reports whether persisted session state was loaded without data loss.
+func (r *SessionRegistry) Ready() error {
+	if r == nil {
+		return fmt.Errorf("registro de sesiones no configurado")
+	}
+	return r.initErr
+}
+
+// HasEncryptedStorage reporta si el registro está respaldado por almacenamiento cifrado persistente.
+func (r *SessionRegistry) HasEncryptedStorage() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.storage != nil
 }
 
 // SetHTTPClient asigna un cliente HTTP personalizado (p.ej. con interceptor de tráfico).
@@ -70,6 +104,9 @@ func generateUUIDv4() string {
 
 // Create registra una nueva sesión a partir de una lista de cookies, validándola inmediatamente contra Facebook.
 func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateInput) (*SessionRecord, error) {
+	if err := r.Ready(); err != nil {
+		return nil, err
+	}
 	if len(input.Cookies) < 2 {
 		return nil, fmt.Errorf("se requieren al menos 2 cookies para inicializar la sesión")
 	}
@@ -77,6 +114,9 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 	tenantID := input.TenantID
 	if tenantID == "" {
 		tenantID = "default"
+	}
+	if err := ValidateTenantID(tenantID); err != nil {
+		return nil, err
 	}
 	label := input.Label
 	if label == "" {
@@ -98,15 +138,17 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 	now := UTCNow()
 
 	record := &SessionRecord{
-		SessionID:    sessionID,
-		Label:        label,
-		TenantID:     tenantID,
-		Cookies:      input.Cookies,
-		FacebookID:   providerData.FacebookID,
-		Status:       "active",
-		CreatedAt:    now,
-		LastActivity: now,
-		ProviderData: providerData,
+		SessionID:      sessionID,
+		Label:          label,
+		TenantID:       tenantID,
+		Cookies:        input.Cookies,
+		FacebookID:     providerData.FacebookID,
+		Status:         "active",
+		CreatedAt:      now,
+		ValidatedAt:    now,
+		LastActivityAt: now,
+		LastActivity:   now,
+		ProviderData:   providerData,
 	}
 
 	r.mu.Lock()
@@ -114,7 +156,12 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 	r.mu.Unlock()
 
 	if r.storage != nil {
-		_ = r.storage.Save(record)
+		if err := r.storage.Save(record); err != nil {
+			r.mu.Lock()
+			delete(r.sessions, sessionID)
+			r.mu.Unlock()
+			return nil, fmt.Errorf("error al persistir sesión: %w", err)
+		}
 	}
 
 	return record, nil
@@ -156,6 +203,9 @@ func (r *SessionRegistry) Get(sessionID string) (*SessionRecord, error) {
 
 // Validate vuelve a extraer los tokens de la sesión contra Facebook y actualiza el registro.
 func (r *SessionRegistry) Validate(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	if err := r.Ready(); err != nil {
+		return nil, err
+	}
 	rec, err := r.Get(sessionID)
 	if err != nil {
 		return nil, err
@@ -169,12 +219,15 @@ func (r *SessionRegistry) Validate(ctx context.Context, sessionID string) (*Sess
 
 	now := UTCNow()
 	rec.LastActivity = now
+	rec.LastActivityAt = now
 
 	if err != nil {
 		rec.Status = "error"
 		rec.LastError = err.Error()
 		if r.storage != nil {
-			_ = r.storage.Save(rec)
+			if saveErr := r.storage.Save(rec); saveErr != nil {
+				return nil, fmt.Errorf("error al persistir estado inválido: %w", saveErr)
+			}
 		}
 		return nil, fmt.Errorf("la sesión es inválida o ha caducado: %w", err)
 	}
@@ -183,9 +236,15 @@ func (r *SessionRegistry) Validate(ctx context.Context, sessionID string) (*Sess
 	rec.LastError = ""
 	rec.FacebookID = providerData.FacebookID
 	rec.ProviderData = providerData
+	now = UTCNow()
+	rec.ValidatedAt = now
+	rec.LastActivityAt = now
+	rec.LastActivity = now
 
 	if r.storage != nil {
-		_ = r.storage.Save(rec)
+		if err := r.storage.Save(rec); err != nil {
+			return nil, fmt.Errorf("error al persistir sesión validada: %w", err)
+		}
 	}
 
 	return rec, nil
@@ -193,18 +252,23 @@ func (r *SessionRegistry) Validate(ctx context.Context, sessionID string) (*Sess
 
 // Delete remueve una sesión de memoria y del disco.
 func (r *SessionRegistry) Delete(sessionID string) error {
+	if err := r.Ready(); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	rec, exists := r.sessions[sessionID]
 	if !exists {
 		r.mu.Unlock()
 		return fmt.Errorf("sesión no encontrada: %s", sessionID)
 	}
+	if r.storage != nil {
+		if err := r.storage.Delete(rec.TenantID, sessionID); err != nil && !os.IsNotExist(err) {
+			r.mu.Unlock()
+			return fmt.Errorf("error al eliminar sesión persistida: %w", err)
+		}
+	}
 	delete(r.sessions, sessionID)
 	r.mu.Unlock()
-
-	if r.storage != nil {
-		_ = r.storage.Delete(rec.TenantID, sessionID)
-	}
 	return nil
 }
 
@@ -213,7 +277,9 @@ func (r *SessionRegistry) RecordActivity(sessionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rec, exists := r.sessions[sessionID]; exists {
-		rec.LastActivity = UTCNow()
+		now := UTCNow()
+		rec.LastActivity = now
+		rec.LastActivityAt = now
 		if r.storage != nil {
 			_ = r.storage.Save(rec)
 		}
@@ -227,7 +293,9 @@ func (r *SessionRegistry) RecordError(sessionID string, errMsg string) {
 	if rec, exists := r.sessions[sessionID]; exists {
 		rec.Status = "error"
 		rec.LastError = errMsg
-		rec.LastActivity = UTCNow()
+		now := UTCNow()
+		rec.LastActivity = now
+		rec.LastActivityAt = now
 		if r.storage != nil {
 			_ = r.storage.Save(rec)
 		}

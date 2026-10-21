@@ -48,6 +48,7 @@ func BenchmarkRedactSensitive(b *testing.B) {
 }
 
 func BenchmarkSessionStoreSaveAndLoad(b *testing.B) {
+	b.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
 	tmpDir, err := os.MkdirTemp("", "fbreego_bench_*")
 	if err != nil {
 		b.Fatalf("failed to create temp dir: %v", err)

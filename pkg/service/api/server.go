@@ -4,8 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +30,11 @@ type AuditLogEntry struct {
 	SessionID string `json:"sessionId,omitempty"`
 }
 
+type websocketTicket struct {
+	ExpiresAt time.Time
+	SessionID string
+}
+
 // Server estructura los componentes principales del microservicio HTTP REST y WebSocket.
 type Server struct {
 	Registry        *sessions.SessionRegistry
@@ -41,11 +44,12 @@ type Server struct {
 	EventHub        *events.RealtimeHub
 	ListenerManager *events.SessionListenerManager
 	TrafficStore    *traffic.TrafficStore
+	TrafficEnabled  bool
 	E2EEManager     *e2ee.ProtocolManager
 	httpClient      *http.Client
 
 	ticketsMu sync.Mutex
-	tickets   map[string]time.Time
+	tickets   map[string]websocketTicket
 
 	auditMu   sync.Mutex
 	auditLogs []AuditLogEntry
@@ -69,6 +73,7 @@ func NewServer(
 	if hub == nil {
 		hub = events.NewRealtimeHub()
 	}
+	hub.SetDispatcher(disp)
 	if lManager == nil {
 		lManager = events.NewSessionListenerManager(hub)
 	}
@@ -76,8 +81,7 @@ func NewServer(
 		mStore = media.NewMediaStorage("")
 	}
 	if reg == nil {
-		encStore := sessions.NewEncryptedSessionStore("")
-		reg = sessions.NewSessionRegistry(encStore, nil)
+		reg = sessions.NewSessionRegistry(nil, nil)
 	}
 
 	trafficStore := traffic.NewTrafficStore(300)
@@ -101,7 +105,11 @@ func NewServer(
 		}
 	}
 
-	transport := traffic.NewTrafficTransport(baseTransport, trafficStore)
+	trafficEnabled := envFlag("FBCHAT_TRAFFIC_ENABLED", false)
+	transport := baseTransport
+	if trafficEnabled {
+		transport = traffic.NewTrafficTransport(baseTransport, trafficStore)
+	}
 	httpClient := &http.Client{
 		Transport: transport,
 		Timeout:   timeout,
@@ -118,20 +126,21 @@ func NewServer(
 		EventHub:        hub,
 		ListenerManager: lManager,
 		TrafficStore:    trafficStore,
+		TrafficEnabled:  trafficEnabled,
 		E2EEManager:     e2ee.NewProtocolManager(),
 		httpClient:      httpClient,
-		tickets:         make(map[string]time.Time),
+		tickets:         make(map[string]websocketTicket),
 	}
 }
 
 // IssueWebSocketTicket emite un token de un solo uso válido por 30 segundos.
-func (s *Server) IssueWebSocketTicket() string {
+func (s *Server) IssueWebSocketTicket(sessionID string) string {
 	s.ticketsMu.Lock()
 	defer s.ticketsMu.Unlock()
 
 	now := time.Now()
-	for t, exp := range s.tickets {
-		if now.After(exp) {
+	for t, stored := range s.tickets {
+		if now.After(stored.ExpiresAt) {
 			delete(s.tickets, t)
 		}
 	}
@@ -139,24 +148,27 @@ func (s *Server) IssueWebSocketTicket() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	ticket := base64.RawURLEncoding.EncodeToString(b)
-	s.tickets[ticket] = now.Add(WebSocketTicketTTLSecs * time.Second)
+	s.tickets[ticket] = websocketTicket{ExpiresAt: now.Add(WebSocketTicketTTLSecs * time.Second), SessionID: sessionID}
 	return ticket
 }
 
 // ConsumeWebSocketTicket valida y destruye el ticket si sigue vigente.
-func (s *Server) ConsumeWebSocketTicket(ticket string) bool {
+func (s *Server) ConsumeWebSocketTicket(ticket, sessionID string) bool {
 	if ticket == "" {
 		return false
 	}
 	s.ticketsMu.Lock()
 	defer s.ticketsMu.Unlock()
 
-	exp, found := s.tickets[ticket]
+	stored, found := s.tickets[ticket]
 	if !found {
 		return false
 	}
 	delete(s.tickets, ticket)
-	return time.Now().Before(exp)
+	if stored.SessionID != "" && stored.SessionID != sessionID {
+		return false
+	}
+	return time.Now().Before(stored.ExpiresAt)
 }
 
 // RecordAudit registra un evento de auditoría en el buffer circular (últimos 100).
@@ -178,18 +190,12 @@ func (s *Server) RecordAudit(eventType, details, sessionID string) {
 
 // ReadinessReport evalúa el estado de salud y configuración del microservicio.
 func (s *Server) ReadinessReport() map[string]any {
-	reqAuthEnv := os.Getenv("FBCHAT_API_AUTH_REQUIRED")
-	userSet := strings.TrimSpace(os.Getenv("FBCHAT_API_USERNAME")) != ""
-	passSet := strings.TrimSpace(os.Getenv("FBCHAT_API_PASSWORD")) != ""
-	isExplicitlyRequired := reqAuthEnv == "1" || strings.EqualFold(reqAuthEnv, "true") || strings.EqualFold(reqAuthEnv, "on")
-	isExplicitlyDisabled := reqAuthEnv == "0" || strings.EqualFold(reqAuthEnv, "false") || strings.EqualFold(reqAuthEnv, "off")
-
-	authRequired := isExplicitlyRequired || (userSet && passSet && !isExplicitlyDisabled)
-	authConfigured := userSet && passSet
-	authReady := !isExplicitlyRequired || authConfigured
+	auth := currentAuthConfiguration()
+	authReady := !auth.Required || auth.Configured
+	sessionStorageReady := s.Registry.Ready() == nil
 
 	status := "ready"
-	if !authReady {
+	if !authReady || !sessionStorageReady {
 		status = "not_ready"
 	}
 
@@ -200,13 +206,21 @@ func (s *Server) ReadinessReport() map[string]any {
 		"checks": map[string]any{
 			"api_auth": map[string]any{
 				"ready":      authReady,
-				"required":   authRequired,
-				"configured": authConfigured,
+				"required":   auth.Required,
+				"configured": auth.Configured,
+			},
+			"session_storage": map[string]any{
+				"ready": sessionStorageReady,
 			},
 			"e2ee_bridge": map[string]any{
-				"ready":      true,
+				"ready":      false,
 				"required":   false,
-				"configured": true,
+				"configured": false,
+			},
+			"messenger_listener": map[string]any{
+				"ready":      false,
+				"required":   false,
+				"configured": false,
 			},
 			"portal": map[string]any{
 				"ready": true,

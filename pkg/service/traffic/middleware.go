@@ -22,13 +22,33 @@ func (w *responseCaptureWriter) WriteHeader(code int) {
 }
 
 func (w *responseCaptureWriter) Write(b []byte) (int, error) {
-	if w.bodyBuf.Len() < 50*1024 {
-		w.bodyBuf.Write(b)
-	}
+	writePreview(&w.bodyBuf, b)
 	return w.ResponseWriter.Write(b)
 }
 
-// InboundTrafficMiddleware captura las peticiones entrantes hacia la API REST del microservicio.
+type limitedCapture struct{ buf bytes.Buffer }
+
+func (w *limitedCapture) Write(p []byte) (int, error) {
+	writePreview(&w.buf, p)
+	return len(p), nil
+}
+
+func writePreview(dst *bytes.Buffer, p []byte) {
+	remaining := bodyPreviewLimit - dst.Len()
+	if remaining <= 0 {
+		return
+	}
+	if remaining < len(p) {
+		p = p[:remaining]
+	}
+	_, _ = dst.Write(p)
+}
+
+type teeReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
 func InboundTrafficMiddleware(store *TrafficStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,8 +56,6 @@ func InboundTrafficMiddleware(store *TrafficStore) func(http.Handler) http.Handl
 				next.ServeHTTP(w, r)
 				return
 			}
-
-			// Excluir rutas de observabilidad o las peticiones del propio inspector de tráfico
 			path := r.URL.Path
 			if path == "/healthz" || path == "/readyz" || path == "/ws" ||
 				strings.HasPrefix(path, "/api/v1/traffic") ||
@@ -47,53 +65,36 @@ func InboundTrafficMiddleware(store *TrafficStore) func(http.Handler) http.Handl
 			}
 
 			start := time.Now()
-
-			// Clonar body de la petición
-			var reqBodyBytes []byte
+			capture := &limitedCapture{}
 			if r.Body != nil {
-				reqBodyBytes, _ = io.ReadAll(r.Body)
-				r.Body = io.NopCloser(bytes.NewReader(reqBodyBytes))
+				r.Body = &teeReadCloser{Reader: io.TeeReader(r.Body, capture), Closer: r.Body}
 			}
-
-			rcw := &responseCaptureWriter{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-			}
-
+			rcw := &responseCaptureWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(rcw, r)
 
-			duration := time.Since(start).Milliseconds()
-
-			rawReqBody := string(reqBodyBytes)
-			sanitizedReqBody := logger.RedactSensitive(rawReqBody)
+			sanitizedReqBody := logger.RedactSensitive(capture.buf.String())
 			sanitizedReqHeaders := SanitizeHeaders(r.Header)
-
-			rawRespBody := rcw.bodyBuf.String()
-			if len(rawRespBody) > 50*1024 {
-				rawRespBody = rawRespBody[:50*1024] + "... [truncado]"
-			}
-			sanitizedRespBody := logger.RedactSensitive(rawRespBody)
-
+			sanitizedRespBody := logger.RedactSensitive(rcw.bodyBuf.String())
+			sanitizedURL := SanitizeURL("http://localhost:8000" + r.URL.RequestURI())
 			record := &TrafficRecord{
 				Timestamp:            start.UTC().Format(time.RFC3339),
 				Direction:            DirectionInbound,
 				Target:               "API",
 				Method:               r.Method,
-				URL:                  r.URL.RequestURI(),
+				URL:                  sanitizedURL,
 				Path:                 r.URL.Path,
 				Host:                 r.Host,
 				StatusCode:           rcw.statusCode,
 				StatusText:           http.StatusText(rcw.statusCode),
-				DurationMs:           duration,
+				DurationMs:           time.Since(start).Milliseconds(),
 				RequestHeaders:       sanitizedReqHeaders,
 				RequestBody:          sanitizedReqBody,
 				RequestBodyFormatted: formatBodyPreview(sanitizedReqBody, r.Header.Get("Content-Type")),
 				ResponseHeaders:      SanitizeHeaders(rcw.Header()),
 				ResponseBody:         sanitizedRespBody,
 				ResponseBodyFormat:   formatResponseBody(sanitizedRespBody, rcw.Header().Get("Content-Type")),
-				CurlCommand:          GenerateCurl(r.Method, "http://localhost:8000"+r.URL.RequestURI(), sanitizedReqHeaders, sanitizedReqBody),
+				CurlCommand:          GenerateCurl(r.Method, sanitizedURL, sanitizedReqHeaders, sanitizedReqBody),
 			}
-
 			store.Record(record)
 		})
 	}

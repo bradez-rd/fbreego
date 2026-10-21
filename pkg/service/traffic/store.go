@@ -56,6 +56,24 @@ func (s *TrafficStore) Record(rec *TrafficRecord) {
 	if rec.Timestamp == "" {
 		rec.Timestamp = UTCNow()
 	}
+	if rec.ReqHeaders == nil {
+		rec.ReqHeaders = rec.RequestHeaders
+	}
+	if rec.RespHeaders == nil {
+		rec.RespHeaders = rec.ResponseHeaders
+	}
+	if rec.ReqBody == "" {
+		rec.ReqBody = rec.RequestBody
+	}
+	if rec.RespBody == "" {
+		rec.RespBody = rec.ResponseBody
+	}
+	if rec.ReqBodySize == 0 && rec.RequestBody != "" {
+		rec.ReqBodySize = len(rec.RequestBody)
+	}
+	if rec.RespBodySize == 0 && rec.ResponseBody != "" {
+		rec.RespBodySize = len(rec.ResponseBody)
+	}
 
 	var hook OnRecordCallback
 	s.mu.Lock()

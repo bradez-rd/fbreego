@@ -4,20 +4,30 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/bradez-rd/fbreego/pkg/core/types"
+	"github.com/bradez-rd/fbreego/pkg/service/media"
 )
 
+const maxMediaUploadRequestSize = media.MaxMediaFileSize*4/3 + (1 << 20)
+
 func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxMediaUploadRequestSize)
 	contentType := r.Header.Get("Content-Type")
 
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		err := r.ParseMultipartForm(50 << 20) // 50MB
 		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				JSONError(w, "PAYLOAD_TOO_LARGE", "Media upload exceeds the allowed size.", http.StatusRequestEntityTooLarge, nil, "")
+				return
+			}
 			JSONError(w, "INVALID_MULTIPART", "Failed to parse multipart form.", http.StatusBadRequest, nil, "")
 			return
 		}
@@ -41,6 +51,11 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 	// JSON payload con base64
 	var input types.MediaUploadInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			JSONError(w, "PAYLOAD_TOO_LARGE", "Media upload exceeds the allowed size.", http.StatusRequestEntityTooLarge, nil, "")
+			return
+		}
 		JSONError(w, "INVALID_REQUEST", "Invalid JSON payload.", http.StatusUnprocessableEntity, nil, "")
 		return
 	}
@@ -98,7 +113,11 @@ func (s *Server) handleGetMediaInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	mediaID := chi.URLParam(r, "mediaId")
-	deleted := s.MediaStore.Delete(mediaID)
+	deleted, err := s.MediaStore.Delete(mediaID)
+	if err != nil {
+		JSONError(w, "MEDIA_DELETE_FAILED", err.Error(), http.StatusInternalServerError, nil, "")
+		return
+	}
 	if !deleted {
 		JSONError(w, "MEDIA_NOT_FOUND", "Media file not found.", http.StatusNotFound, nil, "")
 		return

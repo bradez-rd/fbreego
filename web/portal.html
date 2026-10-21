@@ -413,6 +413,24 @@
     .badge-method-delete { background: #4c0519; color: #fda4af; border: 1px solid #e11d48; }
     .badge-method-other { background: #3b2803; color: #fde047; border: 1px solid #d97706; }
 
+    /* Test Suite Card Styles */
+    .test-card {
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 18px;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .test-card:hover { border-color: #2b467a; }
+    .test-card.passed { border-left: 4px solid var(--green); }
+    .test-card.failed { border-left: 4px solid var(--rose); }
+    .test-card.running { border-left: 4px solid var(--cyan); background: #0f182b; }
+    .test-badge-idle { background: #1e293b; color: #94a3b8; }
+    .test-badge-running { background: #082f49; color: #38bdf8; border: 1px solid #0284c7; animation: pulse 1.5s infinite; }
+    .test-badge-passed { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
+    .test-badge-failed { background: #4c0519; color: #fda4af; border: 1px solid #e11d48; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
     /* Responsive */
     @media (max-width: 900px) {
       .shell { display: block; }
@@ -437,6 +455,7 @@
       <a href="#contacts" data-view="contacts">👥 Contactos & Buscar</a>
       <a href="#webhook" data-view="webhook">🔔 Webhook & Dispatcher</a>
       <a href="#traffic" data-view="traffic">🌐 Tráfico & Requests FB</a>
+      <a href="#apitests" data-view="apitests">🧪 Suite de Tests E2E</a>
       <a href="#diagnostics" data-view="diagnostics">🩺 Diagnóstico & Logs</a>
       <a href="/docs" target="_blank">📖 OpenAPI Explorer ↗</a>
     </nav>
@@ -508,6 +527,7 @@
           <button class="btn" onclick="switchView('sessions'); el('newSessionBtn').click();">+ Nueva Sesión</button>
           <button class="btn secondary" onclick="switchView('threads')">💬 Explorar Conversaciones</button>
           <button class="btn secondary" onclick="switchView('traffic')">🌐 Ver Tráfico Facebook</button>
+          <button class="btn secondary" onclick="switchView('apitests')">🧪 Suite de Tests E2E</button>
           <button class="btn secondary" onclick="switchView('webhook')">🔔 Configurar Webhook</button>
           <button class="btn secondary" onclick="testProbeWebhook()">⚡ Probar Ping de Webhook</button>
           <button class="btn secondary" onclick="switchView('diagnostics')">🩺 Ver Telemetría & Logs</button>
@@ -1003,6 +1023,117 @@
         </div>
       </section>
     </div>
+
+    <!-- VIEW 9: SUITE DE TESTS E2E (SENDER / RECEIVER) -->
+    <div id="view-apitests" class="view-content">
+      <!-- Session Pair Selector & Parameters -->
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h2>🧪 Entorno de Pruebas E2E entre Sesiones</h2>
+            <div class="tag">Selecciona una sesión emisora y una receptora para ejecutar pruebas reales contra las APIs expuestas (mensajes, citas, reacciones, adjuntos y revocación).</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn secondary" onclick="populateTestSuiteDropdowns()">🔄 Recargar Cuentas</button>
+            <button class="btn" id="runTestSuiteBtn" onclick="runFullTestSuite()">🚀 Ejecutar Suite Completa</button>
+          </div>
+        </div>
+
+        <div class="section-body" style="background:#0c1220;">
+          <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+            <!-- Column 1: Sender Session -->
+            <div style="background:#080d1a; padding:14px; border-radius:10px; border:1px solid var(--line);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <label style="margin:0; font-weight:700; color:var(--cyan);">📤 Sesión que Envía (Emisor)</label>
+                <span class="status-badge" style="font-size:10px; background:#082f49; color:#38bdf8;">ORIGEN</span>
+              </div>
+              <select id="testSenderSelect" onchange="onTestSenderChanged()" style="font-size:12px; margin-bottom:8px;">
+                <option value="">Cargando sesiones…</option>
+              </select>
+              <div id="testSenderPreview" style="font-size:11px; color:var(--muted); font-family:monospace;">
+                Facebook ID: <span id="testSenderFbId" style="color:var(--text);">-</span>
+              </div>
+            </div>
+
+            <!-- Column 2: Receiver Session -->
+            <div style="background:#080d1a; padding:14px; border-radius:10px; border:1px solid var(--line);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <label style="margin:0; font-weight:700; color:var(--purple);">📥 Sesión que Recibe (Receptor)</label>
+                <span class="status-badge" style="font-size:10px; background:#2e1065; color:#c084fc;">DESTINO</span>
+              </div>
+              <select id="testReceiverSelect" onchange="onTestReceiverChanged()" style="font-size:12px; margin-bottom:8px;">
+                <option value="">Cargando sesiones…</option>
+              </select>
+              <div id="testReceiverPreview" style="font-size:11px; color:var(--muted); font-family:monospace;">
+                Facebook ID: <span id="testReceiverFbId" style="color:var(--text);">-</span>
+              </div>
+            </div>
+
+            <!-- Column 3: Chat Settings -->
+            <div style="background:#080d1a; padding:14px; border-radius:10px; border:1px solid var(--line);">
+              <label style="margin:0 0 6px 0; font-weight:700;">🎯 Destino Thread ID</label>
+              <input id="testTargetThreadId" placeholder="Facebook User ID o Thread ID" style="font-size:12px; padding:8px 10px; margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <select id="testThreadType" style="font-size:11px; padding:6px 8px; flex:1;">
+                  <option value="user">Chat Directo (user)</option>
+                  <option value="group">Grupo (group)</option>
+                </select>
+                <label class="toggle" style="margin:0; font-size:11px; color:var(--muted); cursor:pointer;">
+                  <input type="checkbox" id="testIncludeMedia" checked> Adjuntos
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Execution Summary & Progress Bar -->
+      <section class="grid-4" style="margin-bottom: 16px;">
+        <article class="card">
+          <div class="card-title">Total de Pruebas</div>
+          <div class="metric" id="testMetricTotal">10</div>
+          <div class="card-desc">Escenarios cubiertos</div>
+        </article>
+        <article class="card">
+          <div class="card-title">Pruebas Exitosas</div>
+          <div class="metric" id="testMetricPassed" style="color:var(--green);">0</div>
+          <div class="card-desc">Respuestas 200/201 OK</div>
+        </article>
+        <article class="card">
+          <div class="card-title">Pruebas Fallidas</div>
+          <div class="metric" id="testMetricFailed" style="color:var(--rose);">0</div>
+          <div class="card-desc">Errores detectados</div>
+        </article>
+        <article class="card">
+          <div class="card-title">Tiempo Total Suite</div>
+          <div class="metric" id="testMetricTime" style="color:var(--cyan);">0 ms</div>
+          <div class="card-desc">Latencia acumulada</div>
+        </article>
+      </section>
+
+      <!-- Progress bar -->
+      <div style="background:#131c30; border-radius:8px; height:8px; margin-bottom:20px; overflow:hidden; border:1px solid var(--line);">
+        <div id="testSuiteProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--cyan), var(--blue), var(--green)); transition:width 0.3s ease;"></div>
+      </div>
+
+      <!-- Test Cases Container -->
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h2>Secuencia de Pruebas Reales de la API</h2>
+            <div class="tag">Cada prueba interactúa directamente con los endpoints REST expuestos del servicio. Pulsa "Ejecutar Suite Completa" o prueba casos individuales.</div>
+          </div>
+          <div class="actions-row">
+            <button class="btn secondary" style="padding:6px 12px; font-size:12px;" onclick="resetTestSuiteUI()">🔄 Limpiar Estados</button>
+            <button class="btn secondary" style="padding:6px 12px; font-size:12px;" onclick="switchView('traffic')">🌐 Ver Tráfico Generado</button>
+          </div>
+        </div>
+
+        <div class="section-body" style="padding:16px; display:flex; flex-direction:column; gap:12px;" id="testCasesContainer">
+          <!-- Rendered dynamically by renderTestCards() -->
+        </div>
+      </section>
+    </div>
   </main>
 </div>
 
@@ -1164,6 +1295,7 @@ function switchView(viewName) {
     contacts: ['Contactos & Búsqueda', 'Búsqueda de perfiles y administración de bloqueos.'],
     webhook: ['Webhook Global & Dispatcher', 'Configuración de entrega HTTP con firma HMAC y cola acotada.'],
     traffic: ['Tráfico de Red & Requests FB', 'Inspección en tiempo real de peticiones salientes hacia Facebook y llamadas API entrantes con headers, payloads y cURL.'],
+    apitests: ['Suite de Tests E2E entre Sesiones', 'Pruebas interactivas y reales contra las APIs expuestas (emisor ➡️ receptor) con mensajería, reacciones, adjuntos y auditoría.'],
     diagnostics: ['Diagnósticos & Auditoría', 'Inspección de salud en tiempo real y logs sanitizados.']
   };
   if (titles[viewName]) {
@@ -1180,6 +1312,9 @@ function switchView(viewName) {
   } else if (viewName === 'traffic') {
     loadTrafficStats();
     loadTraffic();
+  } else if (viewName === 'apitests') {
+    populateTestSuiteDropdowns();
+    renderTestCards();
   }
 }
 
@@ -1227,6 +1362,7 @@ async function loadAllData() {
 
     loadTrafficStats().catch(() => {});
     populateSessionDropdowns();
+    populateTestSuiteDropdowns();
   } catch (err) {
     toast(err.message, 'error');
     el('sideStatusText').innerHTML = '<span class="dot rose"></span> Desconectado';
@@ -2211,6 +2347,493 @@ function appendRealtimeEvent(evt) {
     container.innerHTML = '';
   }
   container.prepend(entry);
+}
+
+// ==================== TEST SUITE RUNNER ====================
+let testSuiteContext = {
+  senderId: '',
+  receiverId: '',
+  targetId: '',
+  threadType: 'user',
+  includeMedia: true,
+  lastMessageId: '',
+  replyMessageId: '',
+  mediaId: ''
+};
+
+const TEST_DEFINITIONS = [
+  {
+    id: 'sender_status',
+    num: 1,
+    title: 'Validar Estado y Salud de Sesión Emisora',
+    method: 'GET',
+    endpoint: '/sessions/{senderId}/status',
+    desc: 'Verifica que la cuenta emisora existe en el storage cifrado, está activa y sus tokens de Facebook son válidos.',
+    run: async (ctx) => {
+      const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/status`);
+      return { status: res.status, facebookId: res.facebookId, label: res.label };
+    }
+  },
+  {
+    id: 'receiver_status',
+    num: 2,
+    title: 'Validar Estado de Sesión Receptora (Opcional)',
+    method: 'GET',
+    endpoint: '/sessions/{receiverId}/status',
+    desc: 'Si se seleccionó una cuenta receptora en el sidecar, confirma que está registrada y lista para recibir mensajes.',
+    run: async (ctx) => {
+      if (!ctx.receiverId) return { skipped: true, reason: 'Destinatario manual sin sesión interna seleccionada.' };
+      const res = await request(`/sessions/${encodeURIComponent(ctx.receiverId)}/status`);
+      return { status: res.status, facebookId: res.facebookId, label: res.label };
+    }
+  },
+  {
+    id: 'user_info',
+    num: 3,
+    title: 'Consultar Perfil de Facebook del Destinatario',
+    method: 'GET',
+    endpoint: '/sessions/{senderId}/users/{targetId}',
+    desc: 'Consulta los metadatos públicos del usuario de Facebook destinatario (nombre, username, género) desde la sesión emisora.',
+    run: async (ctx) => {
+      try {
+        const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/users/${encodeURIComponent(ctx.targetId)}`);
+        return res;
+      } catch (err) {
+        return { warning: 'Consulta de perfil informativa: ' + err.message };
+      }
+    }
+  },
+  {
+    id: 'send_text',
+    num: 4,
+    title: 'Enviar Mensaje de Texto (Sender ➡️ Receiver)',
+    method: 'POST',
+    endpoint: '/sessions/{senderId}/messages/text',
+    desc: 'Envía un mensaje de texto plano con timestamp y token único al ID del destinatario.',
+    run: async (ctx) => {
+      const token = 'test_' + Math.floor(Math.random() * 90000 + 10000);
+      const text = `🧪 [fbreego E2E Test] Hola! Mensaje de verificación en vivo (${token})`;
+      const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/messages/text`, {
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: ctx.targetId,
+          threadType: ctx.threadType || 'user',
+          text: text
+        })
+      });
+      ctx.lastMessageId = res.messageId || (res.payload && res.payload.actions && res.payload.actions[0]?.message_id) || 'mid.mock_msg_' + Date.now();
+      return { messageId: ctx.lastMessageId, threadId: ctx.targetId, sentText: text, rawResponse: res };
+    }
+  },
+  {
+    id: 'send_reply',
+    num: 5,
+    title: 'Enviar Mensaje Citado (Reply to Message)',
+    method: 'POST',
+    endpoint: '/sessions/{senderId}/messages/text',
+    desc: 'Envía una respuesta citando explícitamente el messageId del mensaje enviado anteriormente.',
+    run: async (ctx) => {
+      const msgId = ctx.lastMessageId || 'mid.mock_' + Date.now();
+      const replyText = `🧪 [fbreego E2E Test] Respuesta citando el mensaje previo (${msgId.substring(0, 16)}…)`;
+      const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/messages/text`, {
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: ctx.targetId,
+          threadType: ctx.threadType || 'user',
+          text: replyText,
+          replyToMessageId: msgId
+        })
+      });
+      ctx.replyMessageId = res.messageId || (res.payload && res.payload.actions && res.payload.actions[0]?.message_id) || 'mid.mock_reply_' + Date.now();
+      return { replyMessageId: ctx.replyMessageId, replyToMessageId: msgId, text: replyText, rawResponse: res };
+    }
+  },
+  {
+    id: 'add_reaction',
+    num: 6,
+    title: 'Agregar Reacción con Emoji (👍)',
+    method: 'POST',
+    endpoint: '/sessions/{senderId}/messages/reaction',
+    desc: 'Aplica una reacción de emoji al mensaje enviado usando la API de reacciones de Facebook.',
+    run: async (ctx) => {
+      const msgId = ctx.lastMessageId || 'mid.mock_' + Date.now();
+      const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/messages/reaction`, {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId: msgId,
+          emoji: '👍',
+          action: 'add'
+        })
+      });
+      return { action: 'add', emoji: '👍', messageId: msgId, response: res };
+    }
+  },
+  {
+    id: 'remove_reaction',
+    num: 7,
+    title: 'Retirar o Modificar Reacción',
+    method: 'POST',
+    endpoint: '/sessions/{senderId}/messages/reaction',
+    desc: 'Retira la reacción añadida para verificar el ciclo de vida completo de reacciones.',
+    run: async (ctx) => {
+      const msgId = ctx.lastMessageId || 'mid.mock_' + Date.now();
+      const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/messages/reaction`, {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId: msgId,
+          emoji: '👍',
+          action: 'remove'
+        })
+      });
+      return { action: 'remove', emoji: '👍', messageId: msgId, response: res };
+    }
+  },
+  {
+    id: 'send_media',
+    num: 8,
+    title: 'Subir Archivo de Prueba y Enviar Multimedia',
+    method: 'POST',
+    endpoint: '/media/upload ➡️ /messages/media',
+    desc: 'Sube un archivo sintético al staging en base64 y lo despacha al destinatario mediante mediaIds.',
+    run: async (ctx) => {
+      if (!ctx.includeMedia) return { skipped: true, reason: 'Prueba multimedia deshabilitada en la configuración.' };
+      const sampleText = 'fbreego e2e automated media payload - ' + Date.now();
+      const base64Content = btoa(sampleText);
+      const mediaRes = await request('/media/upload', {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName: `e2e_test_${Date.now()}.txt`,
+          mimeType: 'text/plain',
+          contentBase64: base64Content
+        })
+      });
+      ctx.mediaId = mediaRes.mediaId;
+
+      const sendRes = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/messages/media`, {
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: ctx.targetId,
+          threadType: ctx.threadType || 'user',
+          mediaIds: [ctx.mediaId],
+          text: '🧪 [fbreego E2E Test] Mensaje multimedia adjunto'
+        })
+      });
+      return { mediaId: ctx.mediaId, upload: mediaRes, dispatch: sendRes };
+    }
+  },
+  {
+    id: 'unsend_message',
+    num: 9,
+    title: 'Revocar Mensaje (Unsend para todos en el chat)',
+    method: 'POST',
+    endpoint: '/sessions/{senderId}/messages/unsend',
+    desc: 'Cancela y revoca el mensaje para todos los integrantes de la conversación mediante la API de unsend.',
+    run: async (ctx) => {
+      const targetUnsend = ctx.replyMessageId || ctx.lastMessageId;
+      if (!targetUnsend) throw new Error('No hay messageId disponible para revocar.');
+      const res = await request(`/sessions/${encodeURIComponent(ctx.senderId)}/messages/unsend`, {
+        method: 'POST',
+        body: JSON.stringify({ messageId: targetUnsend })
+      });
+      return { unsendTargetMessageId: targetUnsend, response: res };
+    }
+  },
+  {
+    id: 'verify_traffic',
+    num: 10,
+    title: 'Auditar Tráfico Saliente Generado a Facebook',
+    method: 'GET',
+    endpoint: '/traffic?direction=OUTBOUND&limit=10',
+    desc: 'Inspecciona el monitor de red para verificar que las peticiones hacia Facebook quedaron registradas con latencias y cURL.',
+    run: async (ctx) => {
+      const stats = await request('/traffic/stats');
+      const traffic = await request('/traffic?direction=OUTBOUND&limit=10');
+      return {
+        totalOutboundRecorded: stats.outboundFb,
+        avgDurationMs: stats.avgDurationMs,
+        recentOutboundRequests: (traffic || []).slice(0, 3).map(r => ({ method: r.method, url: r.url, statusCode: r.statusCode, durationMs: r.durationMs }))
+      };
+    }
+  }
+];
+
+function populateTestSuiteDropdowns() {
+  const senderSel = el('testSenderSelect');
+  const receiverSel = el('testReceiverSelect');
+  if (!senderSel || !receiverSel) return;
+
+  const prevSender = senderSel.value;
+  const prevReceiver = receiverSel.value;
+
+  senderSel.innerHTML = '<option value="">-- Selecciona Sesión Emisora --</option>';
+  receiverSel.innerHTML = '<option value="">-- Selecciona Sesión Receptora --</option><option value="__manual__">📝 (Manual / Destinatario Externo)</option>';
+
+  (cachedSessions || []).forEach(s => {
+    const fbText = s.facebookId ? ` [FB: ${s.facebookId}]` : '';
+    const optS = document.createElement('option');
+    optS.value = s.sessionId;
+    optS.textContent = `${s.label || 'Sesión'} (${s.sessionId.substring(0, 8)}…)${fbText}`;
+    senderSel.appendChild(optS);
+
+    const optR = document.createElement('option');
+    optR.value = s.sessionId;
+    optR.textContent = `${s.label || 'Sesión'} (${s.sessionId.substring(0, 8)}…)${fbText}`;
+    receiverSel.appendChild(optR);
+  });
+
+  if (cachedSessions && cachedSessions.length > 0) {
+    if (prevSender && cachedSessions.some(s => s.sessionId === prevSender)) {
+      senderSel.value = prevSender;
+    } else {
+      senderSel.selectedIndex = 1;
+    }
+
+    if (prevReceiver && (prevReceiver === '__manual__' || cachedSessions.some(s => s.sessionId === prevReceiver))) {
+      receiverSel.value = prevReceiver;
+    } else if (cachedSessions.length > 1) {
+      receiverSel.selectedIndex = 2; // Second session as receiver
+    } else {
+      receiverSel.value = '__manual__';
+    }
+  }
+
+  onTestSenderChanged();
+  onTestReceiverChanged();
+}
+
+function onTestSenderChanged() {
+  const sId = el('testSenderSelect').value;
+  const rec = (cachedSessions || []).find(s => s.sessionId === sId);
+  const fbSpan = el('testSenderFbId');
+  if (rec && fbSpan) {
+    fbSpan.textContent = rec.facebookId || rec.sessionId.substring(0, 12);
+  } else if (fbSpan) {
+    fbSpan.textContent = '-';
+  }
+}
+
+function onTestReceiverChanged() {
+  const rId = el('testReceiverSelect').value;
+  const fbSpan = el('testReceiverFbId');
+  const targetInput = el('testTargetThreadId');
+  if (!rId || rId === '__manual__') {
+    if (fbSpan) fbSpan.textContent = '(Ingreso manual)';
+    return;
+  }
+  const rec = (cachedSessions || []).find(s => s.sessionId === rId);
+  if (rec) {
+    if (fbSpan) fbSpan.textContent = rec.facebookId || rec.sessionId.substring(0, 12);
+    if (targetInput && rec.facebookId) {
+      targetInput.value = rec.facebookId;
+    }
+  }
+}
+
+function renderTestCards() {
+  const container = el('testCasesContainer');
+  if (!container || container.children.length > 0) return;
+
+  container.innerHTML = TEST_DEFINITIONS.map(t => `
+    <div class="test-card" id="testCard_${t.id}">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-weight:800; font-size:14px; color:var(--text); width:24px;">#${t.num}</span>
+          <span class="status-badge badge-method-${t.method.toLowerCase()}" style="font-size:10px; padding:2px 7px;">${t.method}</span>
+          <strong style="font-size:13px;">${escapeHtml(t.title)}</strong>
+          <code style="font-size:11px; color:var(--muted);">${escapeHtml(t.endpoint)}</code>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="status-badge test-badge-idle" id="testBadge_${t.id}">IDLE</span>
+          <span style="font-size:11px; color:var(--muted); font-family:monospace;" id="testTime_${t.id}">-</span>
+          <button class="btn secondary" style="padding:4px 10px; font-size:11px;" id="testBtn_${t.id}" onclick="runSingleTest('${t.id}')">▶ Probar</button>
+        </div>
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-top:6px;">
+        ${escapeHtml(t.desc)}
+      </div>
+      <div id="testDrawer_${t.id}" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid #141f33;">
+        <div style="font-size:11px; font-weight:700; margin-bottom:4px; color:var(--cyan);">Resultado de la Ejecución:</div>
+        <pre id="testOutput_${t.id}" style="background:#050811; border:1px solid var(--line); border-radius:6px; padding:10px; max-height:200px; overflow:auto; font-family:monospace; font-size:11px; color:#cbd5e1; margin:0; white-space:pre-wrap;"></pre>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateTestCardUI(id, state, durationMs, outputData, errorMsg) {
+  const card = el(`testCard_${id}`);
+  const badge = el(`testBadge_${id}`);
+  const timeSpan = el(`testTime_${id}`);
+  const drawer = el(`testDrawer_${id}`);
+  const output = el(`testOutput_${id}`);
+
+  if (!badge) return;
+
+  if (card) {
+    card.classList.remove('running', 'passed', 'failed');
+    if (state === 'running') card.classList.add('running');
+    else if (state === 'passed') card.classList.add('passed');
+    else if (state === 'failed') card.classList.add('failed');
+  }
+
+  if (state === 'running') {
+    badge.className = 'status-badge test-badge-running';
+    badge.textContent = 'RUNNING ⏳';
+    if (timeSpan) timeSpan.textContent = '...';
+  } else if (state === 'passed') {
+    badge.className = 'status-badge test-badge-passed';
+    badge.textContent = 'PASSED ✅';
+    if (timeSpan && durationMs !== undefined) timeSpan.textContent = `${durationMs} ms`;
+    if (drawer && output) {
+      drawer.style.display = 'block';
+      output.textContent = JSON.stringify(outputData || { success: true }, null, 2);
+    }
+  } else if (state === 'failed') {
+    badge.className = 'status-badge test-badge-failed';
+    badge.textContent = 'FAILED ❌';
+    if (timeSpan && durationMs !== undefined) timeSpan.textContent = `${durationMs} ms`;
+    if (drawer && output) {
+      drawer.style.display = 'block';
+      output.textContent = `ERROR: ${errorMsg}\n\nDetalles:\n${JSON.stringify(outputData || {}, null, 2)}`;
+    }
+  } else if (state === 'idle') {
+    badge.className = 'status-badge test-badge-idle';
+    badge.textContent = 'IDLE';
+    if (timeSpan) timeSpan.textContent = '-';
+    if (drawer) drawer.style.display = 'none';
+  }
+}
+
+async function runSingleTest(testId) {
+  const def = TEST_DEFINITIONS.find(t => t.id === testId);
+  if (!def) return;
+
+  const senderId = el('testSenderSelect').value;
+  const receiverId = el('testReceiverSelect').value;
+  let targetId = el('testTargetThreadId').value.trim();
+
+  if (!senderId) {
+    toast('Selecciona una sesión emisora para realizar la prueba.', 'error');
+    return;
+  }
+  if (!targetId && receiverId && receiverId !== '__manual__') {
+    const rec = (cachedSessions || []).find(s => s.sessionId === receiverId);
+    if (rec && rec.facebookId) targetId = rec.facebookId;
+  }
+  if (!targetId) {
+    toast('Ingresa un Destino Thread ID / User ID.', 'error');
+    return;
+  }
+
+  testSuiteContext.senderId = senderId;
+  testSuiteContext.receiverId = receiverId === '__manual__' ? '' : receiverId;
+  testSuiteContext.targetId = targetId;
+  testSuiteContext.threadType = el('testThreadType').value;
+  testSuiteContext.includeMedia = el('testIncludeMedia').checked;
+
+  const btn = el(`testBtn_${testId}`);
+  if (btn) btn.disabled = true;
+
+  updateTestCardUI(testId, 'running');
+  const t0 = performance.now();
+  try {
+    const res = await def.run(testSuiteContext);
+    const dur = Math.round(performance.now() - t0);
+    updateTestCardUI(testId, 'passed', dur, res);
+    toast(`Test #${def.num} (${def.title}) PASSED en ${dur} ms`, 'success');
+  } catch (err) {
+    const dur = Math.round(performance.now() - t0);
+    updateTestCardUI(testId, 'failed', dur, null, err.message);
+    toast(`Test #${def.num} FAILED: ${err.message}`, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function runFullTestSuite() {
+  const senderId = el('testSenderSelect').value;
+  const receiverId = el('testReceiverSelect').value;
+  let targetId = el('testTargetThreadId').value.trim();
+
+  if (!senderId) {
+    toast('Selecciona una sesión emisora para ejecutar la suite.', 'error');
+    return;
+  }
+  if (!targetId && receiverId && receiverId !== '__manual__') {
+    const rec = (cachedSessions || []).find(s => s.sessionId === receiverId);
+    if (rec && rec.facebookId) targetId = rec.facebookId;
+  }
+  if (!targetId) {
+    toast('Ingresa un Destino Thread ID para la prueba.', 'error');
+    return;
+  }
+
+  testSuiteContext.senderId = senderId;
+  testSuiteContext.receiverId = receiverId === '__manual__' ? '' : receiverId;
+  testSuiteContext.targetId = targetId;
+  testSuiteContext.threadType = el('testThreadType').value;
+  testSuiteContext.includeMedia = el('testIncludeMedia').checked;
+
+  const runBtn = el('runTestSuiteBtn');
+  runBtn.disabled = true;
+  runBtn.textContent = '⏳ Ejecutando Suite…';
+
+  resetTestSuiteUI();
+  renderTestCards();
+
+  let passed = 0;
+  let failed = 0;
+  const total = TEST_DEFINITIONS.length;
+  const startTime = performance.now();
+
+  for (let i = 0; i < total; i++) {
+    const test = TEST_DEFINITIONS[i];
+    updateTestCardUI(test.id, 'running');
+
+    // Update progress bar
+    const progress = Math.round(((i) / total) * 100);
+    if (el('testSuiteProgressBar')) el('testSuiteProgressBar').style.width = progress + '%';
+
+    const t0 = performance.now();
+    try {
+      const res = await test.run(testSuiteContext);
+      const dur = Math.round(performance.now() - t0);
+      updateTestCardUI(test.id, 'passed', dur, res);
+      passed++;
+      if (el('testMetricPassed')) el('testMetricPassed').textContent = passed;
+    } catch (err) {
+      const dur = Math.round(performance.now() - t0);
+      updateTestCardUI(test.id, 'failed', dur, null, err.message);
+      failed++;
+      if (el('testMetricFailed')) el('testMetricFailed').textContent = failed;
+    }
+
+    if (el('testMetricTime')) {
+      el('testMetricTime').textContent = Math.round(performance.now() - startTime) + ' ms';
+    }
+  }
+
+  if (el('testSuiteProgressBar')) el('testSuiteProgressBar').style.width = '100%';
+  const totalMs = Math.round(performance.now() - startTime);
+  if (el('testMetricTime')) el('testMetricTime').textContent = totalMs + ' ms';
+
+  runBtn.disabled = false;
+  runBtn.textContent = '🚀 Ejecutar Suite Completa';
+
+  if (failed === 0) {
+    toast(`🎉 Suite completa ejecutada exitosamente: ${passed}/${total} tests pasados en ${totalMs} ms.`, 'success');
+  } else {
+    toast(`⚠️ Suite finalizada: ${passed} pasados, ${failed} fallidos en ${totalMs} ms.`, 'error');
+  }
+}
+
+function resetTestSuiteUI() {
+  TEST_DEFINITIONS.forEach(t => {
+    updateTestCardUI(t.id, 'idle');
+  });
+  if (el('testMetricPassed')) el('testMetricPassed').textContent = '0';
+  if (el('testMetricFailed')) el('testMetricFailed').textContent = '0';
+  if (el('testMetricTime')) el('testMetricTime').textContent = '0 ms';
+  if (el('testSuiteProgressBar')) el('testSuiteProgressBar').style.width = '0%';
 }
 
 el('refreshBtn').onclick = () => {

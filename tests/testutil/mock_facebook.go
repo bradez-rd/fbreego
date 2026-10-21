@@ -57,12 +57,23 @@ func NewMockFacebookServer() *MockFacebookServer {
 			return
 		}
 
+		if strings.Contains(fbName, "Profile") || docID == "3419284019284718" {
+			fmt.Fprintf(w, `for (;;);{"data":{"user":{"name":"Mock User","username":"mock.user","gender":"UNKNOWN","is_viewer_friend":false}}}`)
+			return
+		}
+
 		if strings.Contains(fbName, "Theme") {
 			fmt.Fprintf(w, `for (;;);{"data":{"messenger_thread_themes":{"theme_edges":[{"node":{"theme_id":"theme_mock","theme_name":"Test Theme","accessibility_label":"Label","theme_key":"key"}}]}}}`)
 			return
 		}
 
 		fmt.Fprintf(w, `for (;;);{"data":{"viewer":{"actor":{"id":"1000888999"}}}}`)
+	})
+
+	// Mock para cancelación de envío (unsend)
+	mux.HandleFunc("/messaging/unsend_message/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		fmt.Fprintf(w, `for (;;);{"payload":{"success":true}}`)
 	})
 
 	// Mock para upload Mercury

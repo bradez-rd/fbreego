@@ -163,6 +163,9 @@ func (s *Server) Routes() http.Handler {
 		pr.Get("/api/v1/traffic/stats", s.handleGetTrafficStats)
 		pr.Get("/api/v1/traffic/{id}", s.handleGetTrafficDetail)
 		pr.Delete("/api/v1/traffic", s.handleClearTraffic)
+
+		// Suite de Tests E2E entre Sesiones y APIs
+		pr.Post("/api/v1/tests/e2e", s.handleRunE2ETests)
 	})
 
 	return r

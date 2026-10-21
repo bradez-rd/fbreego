@@ -25,6 +25,7 @@ func UnsendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, m
 		"fb_dtsg":    {fb.FbDtsg},
 		"jazoest":    {fb.Jazoest},
 		"__user":     {fb.FacebookID},
+		"av":         {fb.FacebookID},
 		"__a":        {"1"},
 		"__req":      {utils.NextRequestBase36()},
 		"__rev":      {fb.ClientRevision},

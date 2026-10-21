@@ -46,7 +46,11 @@ func ParseFacebookJSON(raw []byte, stripForLoopPrefix bool) (map[string]any, err
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.UseNumber() // Para preservar enteros grandes sin pérdida de precisión de punto flotante
 	if err := decoder.Decode(&res); err != nil {
-		return nil, fmt.Errorf("error al decodificar respuesta JSON de facebook: %w", err)
+		snippet := string(trimmed)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		return nil, fmt.Errorf("error al decodificar respuesta JSON de facebook: %w (cuerpo recibido: %q)", err, snippet)
 	}
 
 	return res, nil

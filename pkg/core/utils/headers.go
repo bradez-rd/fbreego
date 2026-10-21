@@ -37,6 +37,8 @@ func DefaultHeaders(host string) http.Header {
 	h.Set("Sec-Fetch-Site", "same-origin")
 	h.Set("Sec-Fetch-Mode", "cors")
 	h.Set("Sec-Fetch-Dest", "empty")
+	h.Set("Sec-Fetch-User", "?1")
+	h.Set("x-asbd-id", "129477")
 	h.Set("Referer", "https://"+host+"/")
 	h.Set("sec-ch-ua", secChUA)
 	h.Set("sec-ch-ua-mobile", "?0")

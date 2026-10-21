@@ -57,27 +57,30 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		"is_unread":                   {"false"},
 		"is_cleared":                  {"false"},
 		"is_forward":                  {"false"},
-		"is_filtered_content":         {"false"},
-		"is_filtered_content_bh":      {"false"},
-		"is_filtered_content_account": {"false"},
-		"is_filtered_content_quan":    {"false"},
-		"is_spoof_warning":            {"false"},
-		"source":                      {"source:chat:prompt"},
-		"source_tags[0]":              {"source:chat"},
-		"body":                        {input.Text},
-		"ui_push_phase":               {"V3"},
-		"status":                      {"0"},
-		"offline_threading_id":        {otid},
-		"message_id":                  {otid},
-		"ephemeral_ttl_mode":          {"0"},
-		"manual_retry_cnt":            {"0"},
-		"has_attachment":              {"false"},
-		"fb_dtsg":                     {fb.FbDtsg},
-		"jazoest":                     {fb.Jazoest},
-		"__user":                      {fb.FacebookID},
-		"__a":                         {"1"},
-		"__req":                       {utils.NextRequestBase36()},
-		"__rev":                       {fb.ClientRevision},
+		"is_filtered_content":             {"false"},
+		"is_filtered_content_bh":          {"false"},
+		"is_filtered_content_account":     {"false"},
+		"is_filtered_content_quasar":      {"false"},
+		"is_filtered_content_invalid_app": {"false"},
+		"is_spoof_warning":                {"false"},
+		"source":                          {"source:chat:web"},
+		"source_tags[0]":                  {"source:chat"},
+		"client_thread_id":                {"root:" + otid},
+		"body":                            {input.Text},
+		"ui_push_phase":                   {"V3"},
+		"status":                          {"0"},
+		"offline_threading_id":            {otid},
+		"message_id":                      {otid},
+		"ephemeral_ttl_mode":              {"0"},
+		"manual_retry_cnt":                {"0"},
+		"has_attachment":                  {"false"},
+		"fb_dtsg":                         {fb.FbDtsg},
+		"jazoest":                         {fb.Jazoest},
+		"__user":                          {fb.FacebookID},
+		"av":                              {fb.FacebookID},
+		"__a":                             {"1"},
+		"__req":                           {utils.NextRequestBase36()},
+		"__rev":                           {fb.ClientRevision},
 	}
 
 	if input.ThreadType == "group" {
@@ -140,9 +143,31 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		return nil, fmt.Errorf("error al leer respuesta de envío: %w", err)
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		snippet := string(bodyBytes)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		return nil, fmt.Errorf("facebook respondió con código %d: %s", resp.StatusCode, snippet)
+	}
+
 	parsed, err := utils.ParseFacebookJSON(bodyBytes, true)
 	if err != nil {
 		return nil, err
+	}
+
+	if errDesc, ok := parsed["errorDescription"].(string); ok && errDesc != "" {
+		errSum, _ := parsed["errorSummary"].(string)
+		return nil, fmt.Errorf("facebook rechazó el envío: %s (%s)", errDesc, errSum)
+	}
+	if jsmods, ok := parsed["jsmods"].(map[string]any); ok {
+		if require, ok := jsmods["require"].([]any); ok {
+			for _, reqItem := range require {
+				if rArr, ok := reqItem.([]any); ok && len(rArr) >= 2 && rArr[0] == "ServerRedirect" {
+					return nil, fmt.Errorf("la cuenta de Facebook requiere verificación de seguridad (checkpoint)")
+				}
+			}
+		}
 	}
 
 	return parsed, nil

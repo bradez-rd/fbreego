@@ -32,6 +32,9 @@ func Run() {
 	if defaultSessions == "" {
 		defaultSessions = ".fbchat_sessions"
 	}
+	if os.Getenv("FBCHAT_SESSION_SECRET") == "" {
+		_ = os.Setenv("FBCHAT_SESSION_SECRET", "fbchat-default-development-secret-key-change-in-production")
+	}
 
 	portFlag := fs.String("p", defaultPort, "Puerto TCP para escuchar peticiones HTTP")
 	fs.StringVar(portFlag, "port", defaultPort, "Puerto TCP para escuchar peticiones HTTP")
@@ -128,6 +131,7 @@ func Run() {
 		console.SafePrintf(os.Stdout, "🚀 fbreego (%s v%s) escuchando en http://localhost:%s\n", api.ServiceName, api.Version, port)
 		console.SafePrintf(os.Stdout, "   Portal administrativo: http://localhost:%s/\n", port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			console.SafePrintf(os.Stdout, "❌ Fallo crítico en el servidor HTTP: %v\n", err)
 			logger.Error("Fallo crítico en el servidor HTTP: %v", err)
 			os.Exit(1)
 		}

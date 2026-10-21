@@ -387,6 +387,32 @@
     .actions-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .empty-state { padding: 40px 20px; text-align: center; color: var(--muted); }
 
+    /* Traffic Monitor styles */
+    .traffic-filter-btn.active {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+    .traffic-tab-btn.active {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+    .badge-outbound {
+      background: #082f49;
+      color: #38bdf8;
+      border: 1px solid #0284c7;
+    }
+    .badge-inbound {
+      background: #2e1065;
+      color: #c084fc;
+      border: 1px solid #7e22ce;
+    }
+    .badge-method-get { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
+    .badge-method-post { background: #1e3a8a; color: #93c5fd; border: 1px solid #2563eb; }
+    .badge-method-delete { background: #4c0519; color: #fda4af; border: 1px solid #e11d48; }
+    .badge-method-other { background: #3b2803; color: #fde047; border: 1px solid #d97706; }
+
     /* Responsive */
     @media (max-width: 900px) {
       .shell { display: block; }
@@ -410,6 +436,7 @@
       <a href="#media" data-view="media">📁 Media & Archivos</a>
       <a href="#contacts" data-view="contacts">👥 Contactos & Buscar</a>
       <a href="#webhook" data-view="webhook">🔔 Webhook & Dispatcher</a>
+      <a href="#traffic" data-view="traffic">🌐 Tráfico & Requests FB</a>
       <a href="#diagnostics" data-view="diagnostics">🩺 Diagnóstico & Logs</a>
       <a href="/docs" target="_blank">📖 OpenAPI Explorer ↗</a>
     </nav>
@@ -480,6 +507,7 @@
         <div class="section-body actions-row">
           <button class="btn" onclick="switchView('sessions'); el('newSessionBtn').click();">+ Nueva Sesión</button>
           <button class="btn secondary" onclick="switchView('threads')">💬 Explorar Conversaciones</button>
+          <button class="btn secondary" onclick="switchView('traffic')">🌐 Ver Tráfico Facebook</button>
           <button class="btn secondary" onclick="switchView('webhook')">🔔 Configurar Webhook</button>
           <button class="btn secondary" onclick="testProbeWebhook()">⚡ Probar Ping de Webhook</button>
           <button class="btn secondary" onclick="switchView('diagnostics')">🩺 Ver Telemetría & Logs</button>
@@ -900,6 +928,81 @@
         </div>
       </section>
     </div>
+
+    <!-- VIEW 8: TRAFICO & REQUESTS FB -->
+    <div id="view-traffic" class="view-content">
+      <section class="grid-4" style="margin-bottom: 20px;">
+        <article class="card">
+          <div class="card-title">Total Requests Capturados</div>
+          <div class="metric" id="trafficTotalRequests">0</div>
+          <div class="card-desc">Buffer no bloqueante en memoria</div>
+        </article>
+        <article class="card">
+          <div class="card-title">Salientes Facebook ↗</div>
+          <div class="metric" id="trafficFbOutbound" style="color:var(--cyan);">0</div>
+          <div class="card-desc">Llamadas HTTP a Facebook / Graph</div>
+        </article>
+        <article class="card">
+          <div class="card-title">Entrantes API Sidecar ↘</div>
+          <div class="metric" id="trafficApiInbound" style="color:var(--purple);">0</div>
+          <div class="card-desc">Peticiones de clientes a fbreego</div>
+        </article>
+        <article class="card">
+          <div class="card-title">Errores (HTTP ≥ 400)</div>
+          <div class="metric" id="trafficErrorCount" style="color:var(--rose);">0</div>
+          <div class="card-desc" id="trafficAvgLatencyDesc">Latencia media: 0 ms</div>
+        </article>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h2>Monitor de Tráfico de Red en Tiempo Real</h2>
+            <div class="tag">Inspección de requests, headers sanitizados, payloads crudos, respuestas y reproducción cURL.</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label class="toggle" style="margin:0; font-size:12px; color:var(--muted);">
+              <input type="checkbox" id="trafficAutoRefresh" checked> Auto-actualizar
+            </label>
+            <button class="btn secondary" style="padding:6px 12px; font-size:12px;" onclick="loadTraffic(); loadTrafficStats();">🔄 Refrescar</button>
+            <button class="btn danger" style="padding:6px 12px; font-size:12px;" onclick="clearTrafficLog()">🗑️ Limpiar Log</button>
+          </div>
+        </div>
+
+        <div style="padding:14px 22px; background:#0c1220; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <div style="display:flex; gap:6px;">
+            <button class="btn secondary traffic-filter-btn active" data-dir="" onclick="setTrafficFilter(this, '')">Todos</button>
+            <button class="btn secondary traffic-filter-btn" data-dir="OUTBOUND" onclick="setTrafficFilter(this, 'OUTBOUND')">Salientes FB ↗</button>
+            <button class="btn secondary traffic-filter-btn" data-dir="INBOUND" onclick="setTrafficFilter(this, 'INBOUND')">Entrantes API ↘</button>
+            <button class="btn secondary traffic-filter-btn" data-dir="ERRORS" onclick="setTrafficFilter(this, 'ERRORS')">⚠️ Solo Errores</button>
+          </div>
+          <div style="flex:1; min-width:200px;">
+            <input type="text" id="trafficSearchInput" placeholder="Buscar por URL, método, código o texto…" style="padding:6px 12px; font-size:12px;" oninput="debounceTrafficSearch()">
+          </div>
+          <span class="pill" id="trafficCountPill">0 peticiones</span>
+        </div>
+
+        <div class="section-body" style="padding:0;">
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:110px;">Dirección</th>
+                  <th style="width:110px;">Método / Status</th>
+                  <th>URL / Endpoint</th>
+                  <th style="width:90px;">Duración</th>
+                  <th style="width:100px;">Hora</th>
+                  <th style="width:110px; text-align:right;">Detalles</th>
+                </tr>
+              </thead>
+              <tbody id="trafficTableBody">
+                <tr><td colspan="6" class="empty-state">Cargando tráfico de red…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 </div>
 
@@ -929,6 +1032,79 @@
       <button type="submit" class="btn" id="connectSessionBtn">Conectar Cuenta</button>
     </div>
   </form>
+</dialog>
+
+<!-- Modal: Traffic Record Inspector -->
+<dialog id="trafficModal" style="width: min(940px, calc(100% - 30px)); max-height: 90vh;">
+  <div class="dialog-head" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span id="trafficModalBadge" class="status-badge">OUTBOUND</span>
+      <span id="trafficModalMethod" style="font-weight:800; font-family:monospace; font-size:15px;">POST</span>
+      <span id="trafficModalStatus" class="status-badge ready">200 OK</span>
+    </div>
+    <button type="button" class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="el('trafficModal').close()">✕ Cerrar</button>
+  </div>
+  <div class="dialog-body" style="overflow-y:auto; max-height:calc(90vh - 140px); display:flex; flex-direction:column; gap:14px;">
+    <!-- Summary Header -->
+    <div style="background:#090e1a; border:1px solid var(--line); border-radius:8px; padding:12px 16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; font-size:12px;">
+      <div style="grid-column: 1 / -1;"><span style="color:var(--muted);">URL Completa:</span><br><code id="trafficModalUrl" style="word-break:break-all; color:var(--cyan); font-weight:600;">-</code></div>
+      <div><span style="color:var(--muted);">Duración:</span><br><strong id="trafficModalDuration">-</strong></div>
+      <div><span style="color:var(--muted);">Timestamp:</span><br><span id="trafficModalTime">-</span></div>
+      <div><span style="color:var(--muted);">Payload / Response Size:</span><br><span id="trafficModalSize">-</span></div>
+    </div>
+
+    <!-- Tab navigation -->
+    <div style="display:flex; gap:6px; border-bottom:1px solid var(--line); padding-bottom:8px; flex-wrap:wrap;">
+      <button type="button" class="btn secondary traffic-tab-btn active" onclick="switchTrafficTab('curl')">📋 cURL Reproducible</button>
+      <button type="button" class="btn secondary traffic-tab-btn" onclick="switchTrafficTab('payload')">📦 Request Payload</button>
+      <button type="button" class="btn secondary traffic-tab-btn" onclick="switchTrafficTab('response')">📥 Response Body</button>
+      <button type="button" class="btn secondary traffic-tab-btn" onclick="switchTrafficTab('headers')">🏷️ Headers</button>
+    </div>
+
+    <!-- Tab: cURL -->
+    <div id="trafficTab-curl" class="traffic-tab-pane">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span class="tag">Comando cURL listo para reproducir en terminal (tokens sensibles enmascarados):</span>
+        <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="copyTrafficCurl()">📋 Copiar cURL</button>
+      </div>
+      <pre id="trafficModalCurl" style="background:#050811; border:1px solid var(--line); border-radius:8px; padding:12px; max-height:280px; overflow:auto; font-family:monospace; font-size:12px; color:#93c5fd; white-space:pre-wrap; word-break:break-all; margin:0;"></pre>
+    </div>
+
+    <!-- Tab: Payload -->
+    <div id="trafficTab-payload" class="traffic-tab-pane" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span class="tag">Cuerpo enviado en la petición:</span>
+        <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="copyElementText('trafficModalPayload')">📋 Copiar Payload</button>
+      </div>
+      <pre id="trafficModalPayload" style="background:#050811; border:1px solid var(--line); border-radius:8px; padding:12px; max-height:280px; overflow:auto; font-family:monospace; font-size:12px; color:#f3f6fc; white-space:pre-wrap; word-break:break-all; margin:0;"></pre>
+    </div>
+
+    <!-- Tab: Response Body -->
+    <div id="trafficTab-response" class="traffic-tab-pane" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span class="tag" id="trafficModalRespTag">Cuerpo de la respuesta:</span>
+        <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="copyElementText('trafficModalResponse')">📋 Copiar Respuesta</button>
+      </div>
+      <pre id="trafficModalResponse" style="background:#050811; border:1px solid var(--line); border-radius:8px; padding:12px; max-height:300px; overflow:auto; font-family:monospace; font-size:12px; color:#a7f3d0; white-space:pre-wrap; word-break:break-all; margin:0;"></pre>
+    </div>
+
+    <!-- Tab: Headers -->
+    <div id="trafficTab-headers" class="traffic-tab-pane" style="display:none;">
+      <div class="grid-2">
+        <div>
+          <div style="font-weight:700; margin-bottom:6px; font-size:12px; color:var(--cyan);">Request Headers</div>
+          <pre id="trafficModalReqHeaders" style="background:#050811; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:240px; overflow:auto; font-family:monospace; font-size:11px; color:#cbd5e1; margin:0; white-space:pre-wrap;"></pre>
+        </div>
+        <div>
+          <div style="font-weight:700; margin-bottom:6px; font-size:12px; color:var(--purple);">Response Headers</div>
+          <pre id="trafficModalRespHeaders" style="background:#050811; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:240px; overflow:auto; font-family:monospace; font-size:11px; color:#cbd5e1; margin:0; white-space:pre-wrap;"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-actions">
+    <button type="button" class="btn secondary" onclick="el('trafficModal').close()">Cerrar</button>
+  </div>
 </dialog>
 
 <div class="toast" id="toast"></div>
@@ -987,6 +1163,7 @@ function switchView(viewName) {
     media: ['Almacenamiento de Medios', 'Carga de archivos locales, asignación de mediaId y límites de tamaño.'],
     contacts: ['Contactos & Búsqueda', 'Búsqueda de perfiles y administración de bloqueos.'],
     webhook: ['Webhook Global & Dispatcher', 'Configuración de entrega HTTP con firma HMAC y cola acotada.'],
+    traffic: ['Tráfico de Red & Requests FB', 'Inspección en tiempo real de peticiones salientes hacia Facebook y llamadas API entrantes con headers, payloads y cURL.'],
     diagnostics: ['Diagnósticos & Auditoría', 'Inspección de salud en tiempo real y logs sanitizados.']
   };
   if (titles[viewName]) {
@@ -1000,6 +1177,9 @@ function switchView(viewName) {
     loadDiagnostics();
   } else if (viewName === 'media') {
     loadMediaList();
+  } else if (viewName === 'traffic') {
+    loadTrafficStats();
+    loadTraffic();
   }
 }
 
@@ -1045,6 +1225,7 @@ async function loadAllData() {
     // Webhook form & dispatcher
     renderWebhook(webhook, status.dispatcher);
 
+    loadTrafficStats().catch(() => {});
     populateSessionDropdowns();
   } catch (err) {
     toast(err.message, 'error');
@@ -1753,7 +1934,272 @@ if (wsBadgeBtn) {
   };
 }
 
+// Clipboard helper
+function copyToClipboard(text, msg = 'Copiado al portapapeles') {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast(msg, 'success')).catch(() => fallbackCopy(text, msg));
+  } else {
+    fallbackCopy(text, msg);
+  }
+}
+function fallbackCopy(text, msg) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    toast(msg, 'success');
+  } catch (e) {
+    toast('No se pudo copiar al portapapeles', 'error');
+  }
+  document.body.removeChild(ta);
+}
+
+// Traffic Monitor & Inspector
+let trafficFilter = {
+  direction: '',
+  search: '',
+  onlyErrors: false
+};
+let trafficRecordsCache = [];
+let trafficSearchTimeout = null;
+
+function setTrafficFilter(btn, dir) {
+  document.querySelectorAll('.traffic-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (dir === 'ERRORS') {
+    trafficFilter.direction = '';
+    trafficFilter.onlyErrors = true;
+  } else {
+    trafficFilter.direction = dir;
+    trafficFilter.onlyErrors = false;
+  }
+  loadTraffic();
+}
+
+function debounceTrafficSearch() {
+  if (trafficSearchTimeout) clearTimeout(trafficSearchTimeout);
+  trafficSearchTimeout = setTimeout(() => {
+    trafficFilter.search = (el('trafficSearchInput').value || '').trim();
+    loadTraffic();
+  }, 250);
+}
+
+async function loadTrafficStats() {
+  try {
+    const stats = await request('/traffic/stats');
+    if (!stats) return;
+    if (el('trafficTotalRequests')) el('trafficTotalRequests').textContent = stats.totalRequests || 0;
+    if (el('trafficFbOutbound')) el('trafficFbOutbound').textContent = stats.outboundFb || 0;
+    if (el('trafficApiInbound')) el('trafficApiInbound').textContent = stats.inboundApi || 0;
+    if (el('trafficErrorCount')) {
+      el('trafficErrorCount').textContent = stats.errorCount || 0;
+      el('trafficErrorCount').style.color = (stats.errorCount > 0) ? 'var(--rose)' : 'var(--green)';
+    }
+    if (el('trafficAvgLatencyDesc')) {
+      el('trafficAvgLatencyDesc').textContent = `Latencia media: ${stats.avgDurationMs || 0} ms`;
+    }
+  } catch (e) {
+    console.warn('Error cargando stats de tráfico:', e);
+  }
+}
+
+async function loadTraffic() {
+  const tbody = el('trafficTableBody');
+  if (!tbody) return;
+
+  let q = [];
+  if (trafficFilter.direction) q.push(`direction=${encodeURIComponent(trafficFilter.direction)}`);
+  if (trafficFilter.search) q.push(`search=${encodeURIComponent(trafficFilter.search)}`);
+  q.push('limit=100');
+
+  try {
+    const records = await request(`/traffic?${q.join('&')}`);
+    let filtered = records || [];
+    if (trafficFilter.onlyErrors) {
+      filtered = filtered.filter(r => r.statusCode >= 400 || (r.error && r.error.length > 0));
+    }
+    trafficRecordsCache = filtered;
+
+    if (el('trafficCountPill')) {
+      el('trafficCountPill').textContent = `${filtered.length} peticiones`;
+    }
+
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No se registraron peticiones que coincidan con el filtro actual.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(r => {
+      const isOut = r.direction === 'OUTBOUND';
+      const dirBadge = isOut
+        ? '<span class="status-badge badge-outbound">FB OUT ↗</span>'
+        : '<span class="status-badge badge-inbound">API IN ↘</span>';
+
+      const m = (r.method || 'GET').toUpperCase();
+      let methodClass = 'badge-method-other';
+      if (m === 'GET') methodClass = 'badge-method-get';
+      else if (m === 'POST') methodClass = 'badge-method-post';
+      else if (m === 'DELETE') methodClass = 'badge-method-delete';
+
+      const isErr = (r.statusCode >= 400 || (r.error && r.error.length > 0));
+      const statusBadge = isErr
+        ? `<span class="status-badge error">${r.statusCode || 'ERR'}</span>`
+        : `<span class="status-badge ready">${r.statusCode || '200'}</span>`;
+
+      const durText = r.durationMs >= 1000 ? (r.durationMs / 1000).toFixed(2) + 's' : (r.durationMs + 'ms');
+      const timeStr = r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : '-';
+
+      let displayUrl = r.url || '';
+      let urlTooltip = escapeHtml(r.url || '');
+      if (displayUrl.length > 70) {
+        displayUrl = displayUrl.substring(0, 67) + '…';
+      }
+
+      return `
+        <tr style="cursor:pointer;" onclick="inspectTrafficRecord('${r.id}')">
+          <td>${dirBadge}</td>
+          <td>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="status-badge ${methodClass}" style="font-size:10px; padding:2px 6px;">${escapeHtml(m)}</span>
+              ${statusBadge}
+            </div>
+          </td>
+          <td>
+            <div title="${urlTooltip}" style="font-family:monospace; font-size:12px; color:var(--text); word-break:break-all;">
+              ${escapeHtml(displayUrl)}
+            </div>
+            ${r.error ? `<div style="color:var(--rose); font-size:11px; margin-top:2px;">⚠️ ${escapeHtml(r.error)}</div>` : ''}
+          </td>
+          <td style="font-family:monospace; font-size:12px; color:var(--muted);">${durText}</td>
+          <td style="font-size:12px; color:var(--muted);">${timeStr}</td>
+          <td style="text-align:right;">
+            <button class="btn secondary" style="padding:4px 8px; font-size:11px;" onclick="event.stopPropagation(); inspectTrafficRecord('${r.id}')">🔍 Ver</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="color:var(--rose);">Error cargando tráfico: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function clearTrafficLog() {
+  if (!confirm('¿Deseas vaciar el historial de tráfico en memoria?')) return;
+  try {
+    await request('/traffic', { method: 'DELETE' });
+    toast('Historial de tráfico vaciado', 'success');
+    await loadTrafficStats();
+    await loadTraffic();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function inspectTrafficRecord(id) {
+  const rec = trafficRecordsCache.find(r => r.id === id);
+  if (!rec) return toast('Registro no encontrado', 'error');
+
+  const isOut = rec.direction === 'OUTBOUND';
+  const badge = el('trafficModalBadge');
+  badge.textContent = isOut ? 'FB OUTBOUND ↗' : 'API INBOUND ↘';
+  badge.className = 'status-badge ' + (isOut ? 'badge-outbound' : 'badge-inbound');
+
+  el('trafficModalMethod').textContent = (rec.method || 'GET').toUpperCase();
+
+  const isErr = (rec.statusCode >= 400 || (rec.error && rec.error.length > 0));
+  const stBadge = el('trafficModalStatus');
+  stBadge.textContent = `${rec.statusCode || 'ERR'} ${rec.statusText || ''}`.trim();
+  stBadge.className = 'status-badge ' + (isErr ? 'error' : 'ready');
+
+  el('trafficModalUrl').textContent = rec.url || '-';
+  el('trafficModalDuration').textContent = `${rec.durationMs || 0} ms (${rec.duration || '-'})`;
+  el('trafficModalTime').textContent = rec.timestamp ? new Date(rec.timestamp).toLocaleString() : '-';
+  el('trafficModalSize').textContent = `Req: ${rec.reqBodySize || 0} B / Resp: ${rec.respBodySize || 0} B`;
+
+  // cURL
+  el('trafficModalCurl').textContent = rec.curlCommand || '(cURL no disponible)';
+
+  // Payload
+  let payloadText = rec.reqBody || '';
+  if (payloadText) {
+    try {
+      const parsed = JSON.parse(payloadText);
+      payloadText = JSON.stringify(parsed, null, 2);
+    } catch (e) {}
+    el('trafficModalPayload').textContent = payloadText;
+  } else {
+    el('trafficModalPayload').textContent = '(Sin payload o body vacío)';
+  }
+
+  // Response Body
+  let respText = rec.respBodyClean || rec.respBody || '';
+  if (respText) {
+    try {
+      const parsed = JSON.parse(respText);
+      respText = JSON.stringify(parsed, null, 2);
+    } catch (e) {}
+    el('trafficModalResponse').textContent = respText;
+    if (rec.respBodyClean && rec.respBodyClean !== rec.respBody) {
+      el('trafficModalRespTag').textContent = 'Cuerpo de la respuesta (Prefijo "for (;;);" de Facebook removido para legibilidad):';
+    } else {
+      el('trafficModalRespTag').textContent = 'Cuerpo de la respuesta:';
+    }
+  } else if (rec.error) {
+    el('trafficModalResponse').textContent = 'ERROR: ' + rec.error;
+    el('trafficModalRespTag').textContent = 'Error en la petición:';
+  } else {
+    el('trafficModalResponse').textContent = '(Respuesta vacía)';
+    el('trafficModalRespTag').textContent = 'Cuerpo de la respuesta:';
+  }
+
+  // Headers formatting
+  function formatHeaders(h) {
+    if (!h || Object.keys(h).length === 0) return '(Ningún header registrado)';
+    return Object.entries(h)
+      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+      .join('\n');
+  }
+
+  el('trafficModalReqHeaders').textContent = formatHeaders(rec.reqHeaders);
+  el('trafficModalRespHeaders').textContent = formatHeaders(rec.respHeaders);
+
+  switchTrafficTab('curl');
+  el('trafficModal').showModal();
+}
+
+function switchTrafficTab(tabName) {
+  document.querySelectorAll('.traffic-tab-btn').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('onclick').includes(`'${tabName}'`));
+  });
+  document.querySelectorAll('.traffic-tab-pane').forEach(p => {
+    p.style.display = (p.id === 'trafficTab-' + tabName) ? 'block' : 'none';
+  });
+}
+
+function copyTrafficCurl() {
+  const text = el('trafficModalCurl').textContent;
+  copyToClipboard(text, 'Comando cURL copiado al portapapeles');
+}
+
+function copyElementText(id) {
+  const text = el(id).textContent;
+  copyToClipboard(text, 'Texto copiado al portapapeles');
+}
+
 function appendRealtimeEvent(evt) {
+  if (evt.event === 'traffic_request') {
+    loadTrafficStats();
+    const autoRefresh = el('trafficAutoRefresh');
+    const isTrafficView = document.getElementById('view-traffic')?.classList.contains('active');
+    if (autoRefresh && autoRefresh.checked && isTrafficView) {
+      loadTraffic();
+    }
+  }
+
   const container = el('wsEventsContainer');
   if (!container) return;
   const time = new Date().toLocaleTimeString();

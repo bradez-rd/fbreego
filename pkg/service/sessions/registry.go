@@ -43,6 +43,22 @@ func NewSessionRegistry(store *EncryptedSessionStore, httpClient *http.Client) *
 	return reg
 }
 
+// SetHTTPClient asigna un cliente HTTP personalizado (p.ej. con interceptor de tráfico).
+func (r *SessionRegistry) SetHTTPClient(client *http.Client) {
+	if client != nil {
+		r.mu.Lock()
+		r.httpClient = client
+		r.mu.Unlock()
+	}
+}
+
+// HTTPClient obtiene el cliente HTTP actual configurado en el registry.
+func (r *SessionRegistry) HTTPClient() *http.Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.httpClient
+}
+
 // generateUUIDv4 crea un identificador único para cada sesión registrada.
 func generateUUIDv4() string {
 	var b [16]byte

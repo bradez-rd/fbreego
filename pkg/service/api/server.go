@@ -14,6 +14,7 @@ import (
 	"github.com/bradez-rd/fbreego/pkg/service/events"
 	"github.com/bradez-rd/fbreego/pkg/service/media"
 	"github.com/bradez-rd/fbreego/pkg/service/sessions"
+	"github.com/bradez-rd/fbreego/pkg/service/traffic"
 	"github.com/bradez-rd/fbreego/pkg/service/webhook"
 )
 
@@ -39,6 +40,7 @@ type Server struct {
 	MediaStore      *media.MediaStorage
 	EventHub        *events.RealtimeHub
 	ListenerManager *events.SessionListenerManager
+	TrafficStore    *traffic.TrafficStore
 	E2EEManager     *e2ee.ProtocolManager
 	httpClient      *http.Client
 
@@ -78,6 +80,36 @@ func NewServer(
 		reg = sessions.NewSessionRegistry(encStore, nil)
 	}
 
+	trafficStore := traffic.NewTrafficStore(300)
+	if hub != nil {
+		trafficStore.SetOnRecordHook(func(r *traffic.TrafficRecord) {
+			hub.Broadcast(map[string]any{
+				"event":   "traffic_request",
+				"request": r,
+			})
+		})
+	}
+
+	var baseTransport http.RoundTripper = http.DefaultTransport
+	timeout := 30 * time.Second
+	if reg != nil && reg.HTTPClient() != nil {
+		if reg.HTTPClient().Transport != nil {
+			baseTransport = reg.HTTPClient().Transport
+		}
+		if reg.HTTPClient().Timeout > 0 {
+			timeout = reg.HTTPClient().Timeout
+		}
+	}
+
+	transport := traffic.NewTrafficTransport(baseTransport, trafficStore)
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   timeout,
+	}
+	if reg != nil {
+		reg.SetHTTPClient(httpClient)
+	}
+
 	return &Server{
 		Registry:        reg,
 		WebhookStore:    wsStore,
@@ -85,8 +117,9 @@ func NewServer(
 		MediaStore:      mStore,
 		EventHub:        hub,
 		ListenerManager: lManager,
+		TrafficStore:    trafficStore,
 		E2EEManager:     e2ee.NewProtocolManager(),
-		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		httpClient:      httpClient,
 		tickets:         make(map[string]time.Time),
 	}
 }

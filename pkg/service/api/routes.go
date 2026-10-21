@@ -9,6 +9,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/bradez-rd/fbreego/pkg/service/traffic"
 	"github.com/bradez-rd/fbreego/web"
 )
 
@@ -17,6 +18,7 @@ func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(CORSMiddleware)
+	r.Use(traffic.InboundTrafficMiddleware(s.TrafficStore))
 
 	// Endpoints públicos de observabilidad
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +157,12 @@ func (s *Server) Routes() http.Handler {
 		pr.Get("/api/v1/media/{mediaId}", s.handleGetMediaFile)
 		pr.Get("/api/v1/media/{mediaId}/info", s.handleGetMediaInfo)
 		pr.Delete("/api/v1/media/{mediaId}", s.handleDeleteMedia)
+
+		// Inspector de Tráfico HTTP (Facebook y API)
+		pr.Get("/api/v1/traffic", s.handleListTraffic)
+		pr.Get("/api/v1/traffic/stats", s.handleGetTrafficStats)
+		pr.Get("/api/v1/traffic/{id}", s.handleGetTrafficDetail)
+		pr.Delete("/api/v1/traffic", s.handleClearTraffic)
 	})
 
 	return r

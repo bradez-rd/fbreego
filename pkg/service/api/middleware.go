@@ -42,19 +42,20 @@ func JSONError(w http.ResponseWriter, code, message string, statusCode int, deta
 // BasicAuthMiddleware verifica las credenciales de la API si la autenticación está habilitada.
 func BasicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqAuth := os.Getenv("FBCHAT_API_AUTH_REQUIRED")
-		// Por defecto requerida a menos que sea explícitamente "0" o "false"
-		if reqAuth == "0" || strings.EqualFold(reqAuth, "false") || strings.EqualFold(reqAuth, "off") {
+		reqAuthEnv := os.Getenv("FBCHAT_API_AUTH_REQUIRED")
+		expectedUser := strings.TrimSpace(os.Getenv("FBCHAT_API_USERNAME"))
+		expectedPass := strings.TrimSpace(os.Getenv("FBCHAT_API_PASSWORD"))
+
+		isExplicitlyRequired := reqAuthEnv == "1" || strings.EqualFold(reqAuthEnv, "true") || strings.EqualFold(reqAuthEnv, "on")
+		isExplicitlyDisabled := reqAuthEnv == "0" || strings.EqualFold(reqAuthEnv, "false") || strings.EqualFold(reqAuthEnv, "off")
+
+		if isExplicitlyDisabled || (!isExplicitlyRequired && expectedUser == "" && expectedPass == "") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		expectedUser := os.Getenv("FBCHAT_API_USERNAME")
-		expectedPass := os.Getenv("FBCHAT_API_PASSWORD")
-
-		// Si es requerida pero no está configurada, devolver 503
-		if strings.TrimSpace(expectedUser) == "" || strings.TrimSpace(expectedPass) == "" {
-			JSONError(w, "AUTH_NOT_CONFIGURED", "API authentication is required but not configured.", http.StatusServiceUnavailable, nil, "")
+		if isExplicitlyRequired && (expectedUser == "" || expectedPass == "") {
+			JSONError(w, "AUTH_NOT_CONFIGURED", "API authentication is required but credentials are not configured.", http.StatusServiceUnavailable, nil, "")
 			return
 		}
 

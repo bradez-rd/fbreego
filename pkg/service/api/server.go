@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,11 +145,15 @@ func (s *Server) RecordAudit(eventType, details, sessionID string) {
 
 // ReadinessReport evalúa el estado de salud y configuración del microservicio.
 func (s *Server) ReadinessReport() map[string]any {
-	reqAuth := os.Getenv("FBCHAT_API_AUTH_REQUIRED") != "0"
-	userSet := os.Getenv("FBCHAT_API_USERNAME") != ""
-	passSet := os.Getenv("FBCHAT_API_PASSWORD") != ""
+	reqAuthEnv := os.Getenv("FBCHAT_API_AUTH_REQUIRED")
+	userSet := strings.TrimSpace(os.Getenv("FBCHAT_API_USERNAME")) != ""
+	passSet := strings.TrimSpace(os.Getenv("FBCHAT_API_PASSWORD")) != ""
+	isExplicitlyRequired := reqAuthEnv == "1" || strings.EqualFold(reqAuthEnv, "true") || strings.EqualFold(reqAuthEnv, "on")
+	isExplicitlyDisabled := reqAuthEnv == "0" || strings.EqualFold(reqAuthEnv, "false") || strings.EqualFold(reqAuthEnv, "off")
+
+	authRequired := isExplicitlyRequired || (userSet && passSet && !isExplicitlyDisabled)
 	authConfigured := userSet && passSet
-	authReady := authConfigured || !reqAuth
+	authReady := !isExplicitlyRequired || authConfigured
 
 	status := "ready"
 	if !authReady {
@@ -162,7 +167,7 @@ func (s *Server) ReadinessReport() map[string]any {
 		"checks": map[string]any{
 			"api_auth": map[string]any{
 				"ready":      authReady,
-				"required":   reqAuth,
+				"required":   authRequired,
 				"configured": authConfigured,
 			},
 			"e2ee_bridge": map[string]any{

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
@@ -138,17 +139,13 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 	}
 	defer resp.Body.Close()
 
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error al leer respuesta de envío: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		snippet := string(bodyBytes)
-		if len(snippet) > 200 {
-			snippet = snippet[:200] + "..."
-		}
-		return nil, fmt.Errorf("facebook respondió con código %d: %s", resp.StatusCode, snippet)
 	}
 
 	parsed, err := utils.ParseFacebookJSON(bodyBytes, true)

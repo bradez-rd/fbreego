@@ -81,7 +81,6 @@ func (s *Server) Routes() http.Handler {
 				"capabilities": []string{
 					"sessions",
 					"session-validation",
-					"session-listeners",
 					"global-webhook-config",
 					"webhook-dispatcher",
 					"websocket-events",
@@ -103,8 +102,8 @@ func (s *Server) Routes() http.Handler {
 						"description": "Send text & replies to users and groups",
 					},
 					"messenger.receive": map[string]string{
-						"status":      "supported",
-						"description": "Webhook ingestion for messages & sessions",
+						"status":      "unavailable",
+						"description": "Realtime Messenger transport is not implemented in this build",
 					},
 					"messenger.threads": map[string]string{
 						"status":      "supported",
@@ -135,8 +134,8 @@ func (s *Server) Routes() http.Handler {
 						"description": "Fetch public Marketplace listings",
 					},
 					"traffic.inspector": map[string]string{
-						"status":      "supported",
-						"description": "Realtime HTTP traffic debugging & cURL export",
+						"status":      map[bool]string{true: "supported", false: "disabled"}[s.TrafficEnabled],
+						"description": "Opt-in HTTP traffic debugging with bounded redacted previews",
 					},
 				},
 			}, http.StatusOK)
@@ -326,7 +325,8 @@ func (s *Server) handleWebSocketStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close(websocket.StatusNormalClosure, "disconnect")
 
-	sub := s.EventHub.Register(ws, sessionID)
+	tenantID := extractTenantID(r)
+	sub := s.EventHub.RegisterWithTenant(ws, sessionID, tenantID)
 	defer s.EventHub.Unregister(sub)
 
 	// Lanzar loop de envío de mensajes hacia el cliente

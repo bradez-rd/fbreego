@@ -112,4 +112,4 @@ Los destinos se limitan a HTTP/HTTPS públicos en sus puertos estándar (80/443)
 
 ## Licencia
 
-Consulte [LICENSE](LICENSE). Las referencias bajo `facebook-research/` se usan para análisis comparativo; sus licencias no autorizan copiar código automáticamente al producto.
+El repositorio todavía no declara una licencia raíz. Debe elegirse y añadirse una antes de redistribuir el proyecto. Las referencias bajo `facebook-research/` se usan para análisis comparativo; sus licencias no autorizan copiar código automáticamente al producto.

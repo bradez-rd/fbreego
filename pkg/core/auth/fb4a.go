@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -20,6 +21,9 @@ const (
 	DefaultFB4AAppAccessToken  = "350685531728|62f8ce9f74b12f84c123cc23437a4a32"
 	LegacyFB4AUserAgent        = "Dalvik/2.1.0 (Linux; U; Android 7.1.2; SM-G988N Build/NRD90M) [FBAN/FB4A;FBAV/340.0.0.27.113;FBPN/com.facebook.katana;FBLC/en_US;FBBV/324485361;FBCR/Carrier;FBMF/samsung;FBBD/samsung;FBDV/SM-G988N;FBSV/7.1.2;FBCA/x86:armeabi-v7a;FBDM/{density=1.0,width=540,height=960};FB_FW/1;FBRV/0;]"
 )
+
+// ErrFB4ALoginDisabled indica que la autenticación mediante emulación FB4A está deshabilitada por razones de seguridad y cumplimiento.
+var ErrFB4ALoginDisabled = fmt.Errorf("la emulación de login FB4A está deshabilitada por seguridad y cumplimiento normativo (F-03)")
 
 var twoFactorSubcodes = map[int]bool{
 	1348162: true,
@@ -36,7 +40,11 @@ func randomUUID() string {
 }
 
 // FB4ALogin autentica una cuenta de Facebook emulando la app oficial de Android (FB4A).
+// Por seguridad y cumplimiento, este método permanece deshabilitado por defecto.
 func FB4ALogin(ctx context.Context, client *http.Client, username, password, totpKey string) (*types.LoginSuccessPayload, error) {
+	if os.Getenv("FBCHAT_ENABLE_UNOFFICIAL_FB4A") != "1" {
+		return nil, ErrFB4ALoginDisabled
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}

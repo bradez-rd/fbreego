@@ -55,6 +55,13 @@ func NewEncryptedSessionStore(stateDir string) *EncryptedSessionStore {
 		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET debe contener al menos 32 caracteres")
 		return store
 	}
+	secretLower := strings.ToLower(secret)
+	if secretLower == "fbchat-default-development-secret-key-change-in-production" ||
+		strings.Contains(secretLower, "change-in-production") ||
+		strings.Contains(secretLower, "change-me") {
+		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET no puede usar la clave de desarrollo conocida o insegura")
+		return store
+	}
 	hash := sha256.Sum256([]byte(secret))
 	store.key = hash[:]
 

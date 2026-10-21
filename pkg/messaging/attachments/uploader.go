@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
@@ -64,6 +65,10 @@ func Upload(ctx context.Context, client *http.Client, fb *types.DataFB, filename
 		return nil, fmt.Errorf("fallo al subir adjunto a facebook: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

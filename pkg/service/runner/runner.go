@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,6 +25,14 @@ import (
 func Run() {
 	fs := flag.NewFlagSet("fbreego", flag.ContinueOnError)
 
+	defaultHost := os.Getenv("FBCHAT_API_HOST")
+	if defaultHost == "" {
+		defaultHost = os.Getenv("HOST")
+	}
+	if defaultHost == "" {
+		defaultHost = "127.0.0.1"
+	}
+
 	defaultPort := os.Getenv("PORT")
 	if defaultPort == "" {
 		defaultPort = "8000"
@@ -32,9 +41,9 @@ func Run() {
 	if defaultSessions == "" {
 		defaultSessions = ".fbchat_sessions"
 	}
-	if os.Getenv("FBCHAT_SESSION_SECRET") == "" {
-		_ = os.Setenv("FBCHAT_SESSION_SECRET", "fbchat-default-development-secret-key-change-in-production")
-	}
+
+	hostFlag := fs.String("H", defaultHost, "Host/IP para escuchar peticiones HTTP (defecto: 127.0.0.1)")
+	fs.StringVar(hostFlag, "host", defaultHost, "Host/IP para escuchar peticiones HTTP (defecto: 127.0.0.1)")
 
 	portFlag := fs.String("p", defaultPort, "Puerto TCP para escuchar peticiones HTTP")
 	fs.StringVar(portFlag, "port", defaultPort, "Puerto TCP para escuchar peticiones HTTP")
@@ -45,6 +54,9 @@ func Run() {
 	mediaFlag := fs.String("m", ".fbchat_media", "Directorio de almacenamiento de archivos multimedia")
 	fs.StringVar(mediaFlag, "media", ".fbchat_media", "Directorio de almacenamiento de archivos multimedia")
 
+	tlsCertFlag := fs.String("tls-cert", os.Getenv("FBCHAT_TLS_CERT"), "Ruta al certificado TLS (opcional)")
+	tlsKeyFlag := fs.String("tls-key", os.Getenv("FBCHAT_TLS_KEY"), "Ruta a la clave privada TLS (opcional)")
+
 	versionFlag := fs.Bool("v", false, "Muestra la versión de fbreego")
 	fs.BoolVar(versionFlag, "version", false, "Muestra la versión de fbreego")
 
@@ -53,9 +65,12 @@ func Run() {
 		fmt.Fprintf(os.Stdout, "Versión: %s (%s)\n\n", api.Version, api.ServiceName)
 		fmt.Fprintf(os.Stdout, "Uso:\n  fbreego [opciones]\n\n")
 		fmt.Fprintf(os.Stdout, "Opciones disponibles:\n")
+		fmt.Fprintf(os.Stdout, "  -H, --host string      Host/IP de escucha (defecto: %s o $FBCHAT_API_HOST)\n", defaultHost)
 		fmt.Fprintf(os.Stdout, "  -p, --port string      Puerto HTTP (defecto: %s o $PORT)\n", defaultPort)
 		fmt.Fprintf(os.Stdout, "  -s, --sessions string  Directorio de sesiones (defecto: %s)\n", defaultSessions)
 		fmt.Fprintf(os.Stdout, "  -m, --media string     Directorio multimedia (defecto: .fbchat_media)\n")
+		fmt.Fprintf(os.Stdout, "      --tls-cert string  Ruta al certificado TLS para HTTPS\n")
+		fmt.Fprintf(os.Stdout, "      --tls-key string   Ruta a la clave privada TLS para HTTPS\n")
 		fmt.Fprintf(os.Stdout, "  -v, --version          Muestra la versión del servicio\n")
 		fmt.Fprintf(os.Stdout, "  -h, --help             Muestra este mensaje de ayuda\n\n")
 	}
@@ -73,7 +88,11 @@ func Run() {
 	}
 
 	port := *portFlag
-	addr := ":" + port
+	host := *hostFlag
+	addr := net.JoinHostPort(host, port)
+	tlsCert := *tlsCertFlag
+	tlsKey := *tlsKeyFlag
+	useTLS := tlsCert != "" && tlsKey != ""
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -99,6 +118,10 @@ func Run() {
 	eventHub := events.NewRealtimeHub()
 	listenerMgr := events.NewSessionListenerManager(eventHub)
 	mediaStore := media.NewMediaStorage(mediaDir)
+	if err := mediaStore.Ready(); err != nil {
+		logger.Error("Configuración insegura del almacén de medios: %v", err)
+		os.Exit(1)
+	}
 	sessionReg := sessions.NewSessionRegistry(encStore, nil)
 	if err := sessionReg.Ready(); err != nil {
 		logger.Error("No se pudieron cargar las sesiones cifradas: %v", err)
@@ -128,9 +151,19 @@ func Run() {
 	signal.Notify(stopSig, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		console.SafePrintf(os.Stdout, "🚀 fbreego (%s v%s) escuchando en http://localhost:%s\n", api.ServiceName, api.Version, port)
-		console.SafePrintf(os.Stdout, "   Portal administrativo: http://localhost:%s/\n", port)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		proto := "http"
+		if useTLS {
+			proto = "https"
+		}
+		console.SafePrintf(os.Stdout, "🚀 fbreego (%s v%s) escuchando en %s://%s:%s\n", api.ServiceName, api.Version, proto, host, port)
+		console.SafePrintf(os.Stdout, "   Portal administrativo: %s://%s:%s/\n", proto, host, port)
+		var err error
+		if useTLS {
+			err = httpServer.ListenAndServeTLS(tlsCert, tlsKey)
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			console.SafePrintf(os.Stdout, "❌ Fallo crítico en el servidor HTTP: %v\n", err)
 			logger.Error("Fallo crítico en el servidor HTTP: %v", err)
 			os.Exit(1)

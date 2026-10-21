@@ -177,6 +177,20 @@ func TestValidateRuntimeConfiguration(t *testing.T) {
 	}
 }
 
+func TestAuthenticationIsRequiredByDefault(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "")
+	t.Setenv("FBCHAT_API_USERNAME", "")
+	t.Setenv("FBCHAT_API_PASSWORD", "")
+
+	config := currentAuthConfiguration()
+	if !config.Required {
+		t.Fatal("expected authentication to be required by default")
+	}
+	if ValidateRuntimeConfiguration() == nil {
+		t.Fatal("expected default configuration without credentials to fail closed")
+	}
+}
+
 func TestOpenAPICoversRegisteredRoutes(t *testing.T) {
 	t.Setenv("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", "0")
 	_, handler := setupTestServer(t)
@@ -216,13 +230,9 @@ func TestServePortalSPA(t *testing.T) {
 		t.Fatalf("GET / retornó status %d, esperado 200", w.Code)
 	}
 	body := w.Body.String()
-	if len(body) < 1000 || !jsonContains(body, "fbchat-v2 Provider Portal") {
+	if len(body) < 1000 || !strings.Contains(body, "fbchat-v2 Provider Portal") {
 		t.Errorf("contenido de portal.html inesperado o incompleto")
 	}
-}
-
-func jsonContains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s != "" && substr != "") && (len(s) >= len(substr))
 }
 
 func TestUIPortalAPISchemaCompatibility(t *testing.T) {
@@ -308,3 +318,133 @@ func TestUIPortalAPISchemaCompatibility(t *testing.T) {
 		t.Errorf("webhook.GetPublic() missing secretConfigured: %v", whPub)
 	}
 }
+
+func TestCORSRejectsNonOptionsRequestsForUnauthorizedOrigin(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	t.Setenv("FBCHAT_API_CORS_ORIGINS", "https://trusted.example.com")
+	_, handler := setupTestServer(t)
+
+	// GET request with unauthorized origin
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil)
+	reqGet.Header.Set("Origin", "https://malicious.example")
+	wGet := httptest.NewRecorder()
+	handler.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden on GET for unauthorized origin, got %d", wGet.Code)
+	}
+	if !strings.Contains(wGet.Body.String(), "CORS_ORIGIN_DENIED") {
+		t.Errorf("expected CORS_ORIGIN_DENIED in body, got: %s", wGet.Body.String())
+	}
+
+	// POST request with unauthorized origin
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", strings.NewReader(`{}`))
+	reqPost.Header.Set("Origin", "https://malicious.example")
+	wPost := httptest.NewRecorder()
+	handler.ServeHTTP(wPost, reqPost)
+	if wPost.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden on POST for unauthorized origin, got %d", wPost.Code)
+	}
+}
+
+func TestBasicAuthRateLimiter(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "1")
+	t.Setenv("FBCHAT_API_USERNAME", "admin")
+	t.Setenv("FBCHAT_API_PASSWORD", "supersecret123")
+	_, handler := setupTestServer(t)
+
+	clientIP := "192.0.2.77:4321"
+
+	// Trigger 5 failed attempts
+	for i := 1; i <= 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil)
+		req.RemoteAddr = clientIP
+		req.SetBasicAuth("admin", "wrongpassword")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401 Unauthorized, got %d", i, w.Code)
+		}
+	}
+
+	// The 6th attempt should be blocked by rate limiter with 429
+	reqBlocked := httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil)
+	reqBlocked.RemoteAddr = clientIP
+	reqBlocked.SetBasicAuth("admin", "supersecret123") // even with correct credentials!
+	wBlocked := httptest.NewRecorder()
+	handler.ServeHTTP(wBlocked, reqBlocked)
+	if wBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests after 5 failed attempts, got %d", wBlocked.Code)
+	}
+	if !strings.Contains(wBlocked.Body.String(), "AUTH_RATE_LIMITED") {
+		t.Errorf("expected AUTH_RATE_LIMITED in body, got: %s", wBlocked.Body.String())
+	}
+}
+
+func TestCrossTenantAccessForbidden(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	srv, handler := setupTestServer(t)
+
+	srv.Registry.RegisterRecord(&sessions.SessionRecord{
+		SessionID:  "session-tenant-alpha-1",
+		TenantID:   "tenant-alpha",
+		Status:     sessions.StatusActive,
+		FacebookID: "10001",
+		CreatedAt:  sessions.UTCNow(),
+	})
+
+	// Access with header X-Tenant-ID matching tenant-beta
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/session-tenant-alpha-1/status", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-beta")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for cross-tenant access, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "FORBIDDEN") {
+		t.Errorf("expected FORBIDDEN code in body, got: %s", w.Body.String())
+	}
+}
+
+func TestDecodeJSONBodyRejectsUnknownFields(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	_, handler := setupTestServer(t)
+
+	// Body with unknown field "injected_field"
+	payload := `{"unknown_field":123,"cookies":[{"name":"c_user","value":"123"},{"name":"xs","value":"456"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 Unprocessable Entity for payload with unknown fields, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "INVALID_REQUEST") {
+		t.Errorf("expected INVALID_REQUEST in response body, got: %s", w.Body.String())
+	}
+}
+
+func TestSwaggerUISecurityHeaders(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	_, handler := setupTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /docs, got %d", w.Code)
+	}
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "default-src 'self'") {
+		t.Errorf("missing or invalid Content-Security-Policy header: %s", csp)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("missing or invalid X-Content-Type-Options header: %s", w.Header().Get("X-Content-Type-Options"))
+	}
+	if w.Header().Get("X-Frame-Options") != "DENY" {
+		t.Errorf("missing or invalid X-Frame-Options header: %s", w.Header().Get("X-Frame-Options"))
+	}
+}
+

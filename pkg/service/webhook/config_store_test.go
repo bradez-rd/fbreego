@@ -43,6 +43,16 @@ func TestWebhookConfigStore(t *testing.T) {
 		t.Errorf("unexpected secret: %s", cfg.Secret)
 	}
 
+	// Dotted UI aliases are normalized to the event names emitted by the hub.
+	_, err = store.Update(true, "https://webhook.site/test-endpoint", []string{"message.received", "message_received", "session.status"}, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected alias normalization error: %v", err)
+	}
+	cfg = store.Get()
+	if len(cfg.Events) != 2 || cfg.Events[0] != "message_received" || cfg.Events[1] != "session_status" {
+		t.Fatalf("unexpected normalized events: %v", cfg.Events)
+	}
+
 	// Verify encryption on disk: new instance should be able to decrypt
 	store2 := NewWebhookConfigStore(tmpDir)
 	cfg2 := store2.Get()

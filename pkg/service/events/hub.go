@@ -14,6 +14,7 @@ type EventSubscriber struct {
 	ws        *websocket.Conn
 	sendChan  chan []byte
 	sessionID string
+	tenantID  string
 }
 
 // EventDispatcher is implemented by asynchronous sinks such as the webhook dispatcher.
@@ -43,12 +44,13 @@ func NewRealtimeHub() *RealtimeHub {
 	}
 }
 
-// Register agrega un nuevo cliente WebSocket al hub.
-func (h *RealtimeHub) Register(ws *websocket.Conn, sessionID string) *EventSubscriber {
+// RegisterWithTenant agrega un nuevo cliente WebSocket al hub asociado opcionalmente a una sesión y/o tenant.
+func (h *RealtimeHub) RegisterWithTenant(ws *websocket.Conn, sessionID, tenantID string) *EventSubscriber {
 	sub := &EventSubscriber{
 		ws:        ws,
 		sendChan:  make(chan []byte, 128),
 		sessionID: sessionID,
+		tenantID:  tenantID,
 	}
 
 	h.mu.Lock()
@@ -56,6 +58,11 @@ func (h *RealtimeHub) Register(ws *websocket.Conn, sessionID string) *EventSubsc
 	h.mu.Unlock()
 
 	return sub
+}
+
+// Register agrega un nuevo cliente WebSocket al hub.
+func (h *RealtimeHub) Register(ws *websocket.Conn, sessionID string) *EventSubscriber {
+	return h.RegisterWithTenant(ws, sessionID, "")
 }
 
 // Unregister retira un cliente WebSocket y cierra su canal de envío.
@@ -85,7 +92,7 @@ func (h *RealtimeHub) Metrics() map[string]any {
 	}
 }
 
-// Broadcast distribuye un evento JSON a todos los clientes suscritos (o filtrados por sessionID si corresponde).
+// Broadcast distribuye un evento JSON aplicando aislamiento estricto por sesión y por tenant.
 func (h *RealtimeHub) Broadcast(event map[string]any) {
 	raw, err := json.Marshal(event)
 	if err != nil {
@@ -93,6 +100,7 @@ func (h *RealtimeHub) Broadcast(event map[string]any) {
 	}
 
 	targetSession, _ := event["sessionId"].(string)
+	targetTenant, _ := event["tenantId"].(string)
 
 	h.mu.Lock()
 	h.totalEvents++
@@ -102,9 +110,22 @@ func (h *RealtimeHub) Broadcast(event map[string]any) {
 	defer h.mu.RUnlock()
 
 	for sub := range h.subscribers {
-		if sub.sessionID != "" && targetSession != "" && sub.sessionID != targetSession {
-			continue
+		// Aislamiento de sesión (F-09): si el suscriptor está filtrado por sesión,
+		// SOLO recibe eventos que expresamente pertenezcan a su sesión.
+		if sub.sessionID != "" {
+			if targetSession == "" || sub.sessionID != targetSession {
+				continue
+			}
 		}
+
+		// Aislamiento de tenant (F-08): si el suscriptor pertenece a un tenant,
+		// no debe observar eventos de otros tenants.
+		if sub.tenantID != "" {
+			if targetTenant != "" && sub.tenantID != targetTenant {
+				continue
+			}
+		}
+
 		select {
 		case sub.sendChan <- raw:
 		default:
@@ -143,18 +164,7 @@ func (h *RealtimeHub) EmitSessionStatus(sessionID, status, errorMessage string) 
 	h.Publish(evt)
 }
 
-// EmitMessageReceived emite un mensaje entrante decodificado.
-func (h *RealtimeHub) EmitMessageReceived(sessionID string, msg any) {
-	evt := map[string]any{
-		"event":     "message_received",
-		"sessionId": sessionID,
-		"message":   msg,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-	}
-	h.Publish(evt)
-}
-
-// PumpWrites bombea los mensajes del canal hacia la conexión WebSocket del suscriptor.
+// PumpWrites envía eventos al cliente WebSocket hasta que se cancele el contexto o falle la conexión.
 func (sub *EventSubscriber) PumpWrites(ctx context.Context) {
 	for {
 		select {
@@ -172,4 +182,9 @@ func (sub *EventSubscriber) PumpWrites(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ListenClient envía eventos al cliente WebSocket hasta que se cancele el contexto o falle la conexión.
+func (h *RealtimeHub) ListenClient(ctx context.Context, sub *EventSubscriber) {
+	sub.PumpWrites(ctx)
 }

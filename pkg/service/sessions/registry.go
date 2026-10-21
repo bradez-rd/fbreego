@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +112,35 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 		return nil, fmt.Errorf("se requieren al menos 2 cookies para inicializar la sesión")
 	}
 
+	seenCookies := make(map[string]bool)
+	hasCUser := false
+	hasXS := false
+	nowUnix := float64(time.Now().Unix())
+
+	for _, c := range input.Cookies {
+		trimmedName := strings.TrimSpace(c.Name)
+		if trimmedName == "" {
+			return nil, fmt.Errorf("nombre de cookie no puede estar vacío")
+		}
+		if seenCookies[trimmedName] {
+			return nil, fmt.Errorf("cookie duplicada en la entrada: %s", trimmedName)
+		}
+		seenCookies[trimmedName] = true
+
+		if trimmedName == "c_user" {
+			hasCUser = true
+		}
+		if trimmedName == "xs" {
+			hasXS = true
+		}
+		if c.ExpirationDate > 0 && c.ExpirationDate < nowUnix {
+			return nil, fmt.Errorf("la cookie '%s' ya ha expirado", trimmedName)
+		}
+	}
+	if !hasCUser || !hasXS {
+		return nil, fmt.Errorf("se requieren obligatoriamente las cookies 'c_user' y 'xs' para una sesión válida")
+	}
+
 	tenantID := input.TenantID
 	if tenantID == "" {
 		tenantID = "default"
@@ -134,8 +164,32 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 		return nil, fmt.Errorf("error al validar sesión con Facebook: %w", err)
 	}
 
-	sessionID := generateUUIDv4()
 	now := UTCNow()
+
+	// Deduplicación por cuenta dentro del tenant (F-06): si ya existe, actualizarla para no crear sesiones concurrentes huérfanas
+	r.mu.Lock()
+	for _, existing := range r.sessions {
+		if existing.TenantID == tenantID && existing.FacebookID == providerData.FacebookID {
+			existing.Cookies = input.Cookies
+			existing.ProviderData = providerData
+			existing.ValidatedAt = now
+			existing.LastActivityAt = now
+			existing.LastActivity = now
+			existing.Status = StatusActive
+			existing.LastError = ""
+			if input.Label != "" {
+				existing.Label = input.Label
+			}
+			r.mu.Unlock()
+			if r.storage != nil {
+				_ = r.storage.Save(existing)
+			}
+			return existing, nil
+		}
+	}
+	r.mu.Unlock()
+
+	sessionID := generateUUIDv4()
 
 	record := &SessionRecord{
 		SessionID:      sessionID,
@@ -143,7 +197,7 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 		TenantID:       tenantID,
 		Cookies:        input.Cookies,
 		FacebookID:     providerData.FacebookID,
-		Status:         "active",
+		Status:         StatusActive,
 		CreatedAt:      now,
 		ValidatedAt:    now,
 		LastActivityAt: now,
@@ -250,8 +304,25 @@ func (r *SessionRegistry) Validate(ctx context.Context, sessionID string) (*Sess
 	return rec, nil
 }
 
-// Delete remueve una sesión de memoria y del disco.
+// GetForTenant obtiene una sesión validando que pertenezca al inquilino especificado (si se especifica tenantID).
+func (r *SessionRegistry) GetForTenant(sessionID, tenantID string) (*SessionRecord, error) {
+	rec, err := r.Get(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if tenantID != "" && rec.TenantID != tenantID {
+		return nil, fmt.Errorf("acceso denegado: la sesión pertenece a otro inquilino")
+	}
+	return rec, nil
+}
+
+// Delete remueve una sesión de memoria y del disco marcando su estado como stopped.
 func (r *SessionRegistry) Delete(sessionID string) error {
+	return r.DeleteForTenant(sessionID, "")
+}
+
+// DeleteForTenant remueve una sesión validando la pertenencia de inquilino.
+func (r *SessionRegistry) DeleteForTenant(sessionID, tenantID string) error {
 	if err := r.Ready(); err != nil {
 		return err
 	}
@@ -261,6 +332,11 @@ func (r *SessionRegistry) Delete(sessionID string) error {
 		r.mu.Unlock()
 		return fmt.Errorf("sesión no encontrada: %s", sessionID)
 	}
+	if tenantID != "" && rec.TenantID != tenantID {
+		r.mu.Unlock()
+		return fmt.Errorf("acceso denegado: la sesión pertenece a otro inquilino")
+	}
+	rec.Status = StatusStopped
 	if r.storage != nil {
 		if err := r.storage.Delete(rec.TenantID, sessionID); err != nil && !os.IsNotExist(err) {
 			r.mu.Unlock()
@@ -272,8 +348,18 @@ func (r *SessionRegistry) Delete(sessionID string) error {
 	return nil
 }
 
+// RegisterRecord registra directamente una sesión en memoria (útil para inicializaciones y pruebas).
+func (r *SessionRegistry) RegisterRecord(rec *SessionRecord) {
+	if rec == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessions[rec.SessionID] = rec
+}
+
 // RecordActivity actualiza la marca temporal de última actividad de la sesión.
-func (r *SessionRegistry) RecordActivity(sessionID string) {
+func (r *SessionRegistry) RecordActivity(sessionID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rec, exists := r.sessions[sessionID]; exists {
@@ -281,13 +367,16 @@ func (r *SessionRegistry) RecordActivity(sessionID string) {
 		rec.LastActivity = now
 		rec.LastActivityAt = now
 		if r.storage != nil {
-			_ = r.storage.Save(rec)
+			if err := r.storage.Save(rec); err != nil {
+				return fmt.Errorf("error al persistir actividad de sesión: %w", err)
+			}
 		}
 	}
+	return nil
 }
 
 // RecordError anota un error operativo y actualiza el estado de la sesión.
-func (r *SessionRegistry) RecordError(sessionID string, errMsg string) {
+func (r *SessionRegistry) RecordError(sessionID string, errMsg string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rec, exists := r.sessions[sessionID]; exists {
@@ -297,9 +386,12 @@ func (r *SessionRegistry) RecordError(sessionID string, errMsg string) {
 		rec.LastActivity = now
 		rec.LastActivityAt = now
 		if r.storage != nil {
-			_ = r.storage.Save(rec)
+			if err := r.storage.Save(rec); err != nil {
+				return fmt.Errorf("error al persistir estado de error de sesión: %w", err)
+			}
 		}
 	}
+	return nil
 }
 
 // Count devuelve la cantidad total de sesiones en memoria.

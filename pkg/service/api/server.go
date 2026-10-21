@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,10 +88,17 @@ func NewServer(
 	trafficStore := traffic.NewTrafficStore(300)
 	if hub != nil {
 		trafficStore.SetOnRecordHook(func(r *traffic.TrafficRecord) {
-			hub.Broadcast(map[string]any{
+			evt := map[string]any{
 				"event":   "traffic_request",
 				"request": r,
-			})
+			}
+			if r.SessionID != "" {
+				evt["sessionId"] = r.SessionID
+			}
+			if r.TenantID != "" {
+				evt["tenantId"] = r.TenantID
+			}
+			hub.Broadcast(evt)
 		})
 	}
 
@@ -188,14 +196,23 @@ func (s *Server) RecordAudit(eventType, details, sessionID string) {
 	}
 }
 
+// recordSessionActivity actualiza la actividad sin convertir un fallo de
+// persistencia posterior en un falso fallo de una operación ya completada.
+func (s *Server) recordSessionActivity(sessionID string) {
+	if err := s.Registry.RecordActivity(sessionID); err != nil {
+		s.RecordAudit("session_activity_persist_failed", err.Error(), sessionID)
+	}
+}
+
 // ReadinessReport evalúa el estado de salud y configuración del microservicio.
 func (s *Server) ReadinessReport() map[string]any {
 	auth := currentAuthConfiguration()
 	authReady := !auth.Required || auth.Configured
 	sessionStorageReady := s.Registry.Ready() == nil
+	mediaStorageReady := s.MediaStore.Ready() == nil
 
 	status := "ready"
-	if !authReady || !sessionStorageReady {
+	if !authReady || !sessionStorageReady || !mediaStorageReady {
 		status = "not_ready"
 	}
 
@@ -211,6 +228,9 @@ func (s *Server) ReadinessReport() map[string]any {
 			},
 			"session_storage": map[string]any{
 				"ready": sessionStorageReady,
+			},
+			"media_storage": map[string]any{
+				"ready": mediaStorageReady,
 			},
 			"e2ee_bridge": map[string]any{
 				"ready":      false,
@@ -228,3 +248,16 @@ func (s *Server) ReadinessReport() map[string]any {
 		},
 	}
 }
+
+// extractTenantID extrae el identificador de inquilino de las cabeceras HTTP o query params.
+func extractTenantID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	tenant := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
+	if tenant == "" {
+		tenant = strings.TrimSpace(r.URL.Query().Get("tenantId"))
+	}
+	return tenant
+}
+

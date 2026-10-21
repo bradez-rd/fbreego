@@ -1,9 +1,16 @@
 package types
 
-// CookieInput representa un par de clave/valor de cookie enviado al crear una sesión.
+// CookieInput representa una cookie HTTP con sus atributos de seguridad y vigencia.
 type CookieInput struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name           string  `json:"name"`
+	Value          string  `json:"value"`
+	Domain         string  `json:"domain,omitempty"`
+	Path           string  `json:"path,omitempty"`
+	Expires        string  `json:"expires,omitempty"`
+	ExpirationDate float64 `json:"expirationDate,omitempty"`
+	Secure         bool    `json:"secure,omitempty"`
+	HttpOnly       bool    `json:"httpOnly,omitempty"`
+	SameSite       string  `json:"sameSite,omitempty"`
 }
 
 // SessionCreateInput representa el payload para registrar una nueva sesión en el servicio.

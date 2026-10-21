@@ -223,15 +223,17 @@ Dependencias: FBR-001 debe preceder eventos recibidos y buena parte de FBR-002; 
 
 | Hallazgos | Estado | Implementación comprobable |
 |---|---|---|
-| FBR-007 | Mitigado | Auth REST/WS unificada y fail-closed; validación de startup; CORS/WS por allowlist; tickets de un uso ligados a sesión; eliminado el password en query. |
+| FBR-007 | Mitigado | Auth REST/WS unificada y fail-closed por defecto; validación de startup; CORS/WS por allowlist; tickets de un uso ligados a sesión; eliminado el password en query. |
 | FBR-008 | Implementado, mock-verificado | `SendWithAttachments` enlaza IDs tipados y el handler deja de silenciar fallos de staging/upload. |
 | FBR-003 | Parcial | `RealtimeHub.Publish` distribuye a WebSocket y `Dispatcher.Enqueue`; operaciones locales publican eventos. La recepción externa depende aún de FBR-001. |
 | FBR-002 / FBR-001 | Veracidad operacional mitigada | E2EE devuelve `ErrProtocolUnavailable`; listener devuelve `501`/error tipado y readiness indica no disponible. El protocolo/transporte real sigue pendiente. |
-| FBR-013 | Parcial | Secreto de 32+ caracteres obligatorio, startup no-cero ante configuración insegura y errores de permisos/persistencia propagados. Faltan KDF versionada y rotación. |
+| FBR-013 | Parcial | Secreto de 32+ caracteres obligatorio, startup no-cero ante configuración insegura, errores de actividad/permisos/persistencia propagados y JSON corrupto protegido contra sobrescritura. Faltan KDF versionada y rotación. |
 | FBR-014 | Parcial | `tenantId` usa allowlist y comprobación de confinamiento de ruta. Sigue pendiente autorización principal→tenant. |
 | FBR-015 | Parcial | Inspector opt-in, previews streaming de 64 KiB y redacción ampliada. Siguen pendientes RBAC dedicado y TTL. |
 | FBR-016 | Implementado | `DialContext` valida la IP exacta, redirects revalidados y backoff cancelable. |
-| FBR-017 | Parcial | Uploads y almacenamiento tienen límites previos; siguen pendientes catálogo persistente, cuotas y validación MIME fuerte. |
-| FBR-011 / FBR-018 | Parcial | README corregido, OpenAPI cubre rutas estables con test de sincronización, endpoint E2E opt-in y regresiones de seguridad añadidas. CI/race/live contracts siguen pendientes. |
+| FBR-017 | Parcial | Uploads y almacenamiento tienen límites previos; el directorio se valida en startup/readiness y los nombres se endurecieron. Siguen pendientes catálogo persistente, cuotas y validación MIME fuerte. |
+| FBR-011 / FBR-018 | Parcial | README corregido, OpenAPI cubre rutas estables con test de sincronización, endpoint E2E opt-in, pruebas débiles reparadas y CI Linux configurado con vet, race y cobertura. Sigue pendiente ejecutar contratos live aislados. |
+
+Durante la remediación se detectaron cookies reales versionadas en `tests/default_cookies/ss1.json` y `ss2.json`. Ambos archivos quedaron ignorados y retirados del índice sin borrar las copias locales. Como ya aparecieron en el commit remoto `81f42e4`, es obligatorio revocar/rotar esas sesiones y posteriormente purgar el historial remoto mediante un procedimiento coordinado; borrar solo el commit actual no invalida los secretos expuestos.
 
 Verificación posterior: `go test ./...`, `go vet ./...` y `git diff --check` pasan sin instalar dependencias nuevas.

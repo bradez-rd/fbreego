@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -45,10 +46,15 @@ func (t *TrafficTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	resp, reqErr := t.base.RoundTrip(req)
 	duration := time.Since(start).Milliseconds()
-	rawReqBody := previewString(reqBodyBytes)
-	sanitizedReqBody := logger.RedactSensitive(rawReqBody)
 	sanitizedReqHeaders := SanitizeHeaders(req.Header)
 	sanitizedURL := SanitizeURL(req.URL.String())
+
+	captureBodies := captureBodiesEnabled()
+	sanitizedReqBody := "[Cuerpo omitido por privacidad - F-09]"
+	if captureBodies {
+		rawReqBody := previewString(reqBodyBytes)
+		sanitizedReqBody = logger.RedactSensitive(rawReqBody)
+	}
 
 	target := "Facebook"
 	if !strings.Contains(req.URL.Host, "facebook.com") {
@@ -76,22 +82,28 @@ func (t *TrafficTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return nil, reqErr
 	}
 
-	var respBodyBytes []byte
-	if resp.Body != nil {
+	sanitizedRespBody := "[Cuerpo omitido por privacidad - F-09]"
+	if captureBodies && resp.Body != nil {
+		var respBodyBytes []byte
 		respBodyBytes, _ = io.ReadAll(io.LimitReader(resp.Body, bodyPreviewLimit+1))
 		resp.Body = &compositeReadCloser{
 			Reader: io.MultiReader(bytes.NewReader(respBodyBytes), resp.Body),
 			Closer: resp.Body,
 		}
+		sanitizedRespBody = logger.RedactSensitive(previewString(respBodyBytes))
 	}
 	record.StatusCode = resp.StatusCode
 	record.StatusText = resp.Status
 	record.ResponseHeaders = SanitizeHeaders(resp.Header)
-	sanitizedRespBody := logger.RedactSensitive(previewString(respBodyBytes))
 	record.ResponseBody = sanitizedRespBody
 	record.ResponseBodyFormat = formatResponseBody(sanitizedRespBody, resp.Header.Get("Content-Type"))
 	t.store.Record(record)
 	return resp, nil
+}
+
+func captureBodiesEnabled() bool {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv("FBCHAT_TRAFFIC_CAPTURE_BODIES")))
+	return val == "1" || val == "true" || val == "yes"
 }
 
 type compositeReadCloser struct {

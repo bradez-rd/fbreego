@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,7 @@ type MediaStorage struct {
 	mu       sync.RWMutex
 	mediaDir string
 	records  map[string]*MediaRecord
+	initErr  error
 }
 
 // NewMediaStorage crea un nuevo gestor de almacenamiento de medios en el directorio especificado.
@@ -58,17 +60,32 @@ func NewMediaStorage(mediaDir string) *MediaStorage {
 	if mediaDir == "" {
 		mediaDir = ".fbchat_media"
 	}
-	_ = os.MkdirAll(mediaDir, 0700)
-	_ = permissions.SetPrivateFilePermissions(mediaDir)
-
-	return &MediaStorage{
+	storage := &MediaStorage{
 		mediaDir: mediaDir,
 		records:  make(map[string]*MediaRecord),
 	}
+	if err := os.MkdirAll(mediaDir, 0700); err != nil {
+		storage.initErr = fmt.Errorf("no se pudo crear el directorio de medios: %w", err)
+		return storage
+	}
+	if err := permissions.SetPrivateFilePermissions(mediaDir); err != nil {
+		storage.initErr = fmt.Errorf("no se pudo proteger el directorio de medios: %w", err)
+	}
+	return storage
+}
+
+// Ready informa si el directorio de medios se pudo crear y proteger.
+func (s *MediaStorage) Ready() error {
+	if s == nil {
+		return fmt.Errorf("almacenamiento de medios no configurado")
+	}
+	return s.initErr
 }
 
 func sanitizeFilename(name string) string {
 	cleaned := filenameSanitizer.ReplaceAllString(name, "_")
+	cleaned = strings.ReplaceAll(cleaned, "..", "_")
+	cleaned = strings.TrimLeft(cleaned, ".")
 	if len(cleaned) > 200 {
 		cleaned = cleaned[:200]
 	}
@@ -80,6 +97,9 @@ func sanitizeFilename(name string) string {
 
 // Store guarda un stream de datos en disco, deduplica por SHA-256 y registra los metadatos.
 func (s *MediaStorage) Store(filename, mimeType string, r io.Reader) (*MediaRecord, error) {
+	if err := s.Ready(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,6 +155,9 @@ func (s *MediaStorage) Store(filename, mimeType string, r io.Reader) (*MediaReco
 
 // GetInfo obtiene los metadatos del medio por su ID.
 func (s *MediaStorage) GetInfo(mediaID string) (*MediaRecord, error) {
+	if err := s.Ready(); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -176,6 +199,9 @@ func (s *MediaStorage) ListAll(limit int) []map[string]any {
 
 // Delete elimina un medio del registro y del disco.
 func (s *MediaStorage) Delete(mediaID string) (bool, error) {
+	if err := s.Ready(); err != nil {
+		return false, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, exists := s.records[mediaID]

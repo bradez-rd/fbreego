@@ -77,7 +77,29 @@ func TestMediaStorageSaveAndRetrieve(t *testing.T) {
 
 func TestSanitizeFilename(t *testing.T) {
 	clean := sanitizeFilename("../../../evil*file?.png")
-	if filepath.Base(clean) == clean && !bytes.Contains([]byte(clean), []byte("..")) {
-		// sanitization worked
+	if filepath.Base(clean) != clean {
+		t.Fatalf("sanitized filename escaped its base: %q", clean)
+	}
+	if bytes.Contains([]byte(clean), []byte("..")) {
+		t.Fatalf("sanitized filename still contains traversal marker: %q", clean)
+	}
+	if clean == "" || len(clean) > 200 {
+		t.Fatalf("sanitized filename has invalid length: %q", clean)
+	}
+}
+
+func TestMediaStorageReportsInitializationFailure(t *testing.T) {
+	root := t.TempDir()
+	notDirectory := filepath.Join(root, "media-file")
+	if err := os.WriteFile(notDirectory, []byte("occupied"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	storage := NewMediaStorage(notDirectory)
+	if storage.Ready() == nil {
+		t.Fatal("expected initialization failure when media path is a file")
+	}
+	if _, err := storage.Store("file.txt", "text/plain", bytes.NewReader([]byte("data"))); err == nil {
+		t.Fatal("expected Store to propagate initialization failure")
 	}
 }

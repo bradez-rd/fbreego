@@ -65,16 +65,22 @@ func InboundTrafficMiddleware(store *TrafficStore) func(http.Handler) http.Handl
 			}
 
 			start := time.Now()
+			captureBodies := captureBodiesEnabled()
 			capture := &limitedCapture{}
-			if r.Body != nil {
+			if captureBodies && r.Body != nil {
 				r.Body = &teeReadCloser{Reader: io.TeeReader(r.Body, capture), Closer: r.Body}
 			}
 			rcw := &responseCaptureWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(rcw, r)
 
-			sanitizedReqBody := logger.RedactSensitive(capture.buf.String())
+			sanitizedReqBody := "[Cuerpo omitido por privacidad - F-09]"
+			sanitizedRespBody := "[Cuerpo omitido por privacidad - F-09]"
+			if captureBodies {
+				sanitizedReqBody = logger.RedactSensitive(capture.buf.String())
+				sanitizedRespBody = logger.RedactSensitive(rcw.bodyBuf.String())
+			}
+
 			sanitizedReqHeaders := SanitizeHeaders(r.Header)
-			sanitizedRespBody := logger.RedactSensitive(rcw.bodyBuf.String())
 			sanitizedURL := SanitizeURL("http://localhost:8000" + r.URL.RequestURI())
 			record := &TrafficRecord{
 				Timestamp:            start.UTC().Format(time.RFC3339),

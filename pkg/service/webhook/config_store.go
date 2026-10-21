@@ -30,6 +30,22 @@ var allowedEvents = map[string]bool{
 	"raw_event":        true,
 }
 
+var eventAliases = map[string]string{
+	"message.received": "message_received",
+	"message.sent":     "message_sent",
+	"reaction.updated": "reaction_updated",
+	"message.unsent":   "message_unsent",
+	"session.status":   "session_status",
+}
+
+func normalizeEventName(event string) (string, bool) {
+	event = strings.TrimSpace(event)
+	if canonical, ok := eventAliases[event]; ok {
+		event = canonical
+	}
+	return event, allowedEvents[event]
+}
+
 // WebhookConfig representa la configuración persistida del webhook global.
 type WebhookConfig struct {
 	Enabled   bool     `json:"enabled"`
@@ -70,6 +86,14 @@ func NewWebhookConfigStore(stateDir string) *WebhookConfigStore {
 	secret := strings.TrimSpace(os.Getenv("FBCHAT_SESSION_SECRET"))
 	if len(secret) < 32 {
 		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET debe contener al menos 32 caracteres")
+		store.cached = &WebhookConfig{Enabled: false, Events: []string{}}
+		return store
+	}
+	secretLower := strings.ToLower(secret)
+	if secretLower == "fbchat-default-development-secret-key-change-in-production" ||
+		strings.Contains(secretLower, "change-in-production") ||
+		strings.Contains(secretLower, "change-me") {
+		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET no puede usar la clave de desarrollo conocida o insegura")
 		store.cached = &WebhookConfig{Enabled: false, Events: []string{}}
 		return store
 	}
@@ -171,9 +195,15 @@ func (s *WebhookConfigStore) Update(enabled bool, targetURL string, events []str
 	}
 
 	var validEvents []string
+	seenEvents := make(map[string]struct{})
 	for _, e := range events {
-		if allowedEvents[e] {
-			validEvents = append(validEvents, e)
+		canonical, valid := normalizeEventName(e)
+		if valid {
+			if _, exists := seenEvents[canonical]; exists {
+				continue
+			}
+			seenEvents[canonical] = struct{}{}
+			validEvents = append(validEvents, canonical)
 		}
 	}
 

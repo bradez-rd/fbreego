@@ -44,7 +44,10 @@ func (f *FileSessionStorage) readData() (map[string]any, error) {
 		return data, nil
 	}
 	if err := json.Unmarshal(raw, &data); err != nil {
-		return make(map[string]any), nil
+		return nil, fmt.Errorf("contenido JSON inválido en %s: %w", f.filePath, err)
+	}
+	if data == nil {
+		return nil, fmt.Errorf("contenido JSON inválido en %s: se esperaba un objeto", f.filePath)
 	}
 	return data, nil
 }
@@ -62,11 +65,17 @@ func (f *FileSessionStorage) writeData(data map[string]any) error {
 	if err := os.WriteFile(tempPath, raw, 0600); err != nil {
 		return err
 	}
-	_ = permissions.SetPrivateFilePermissions(tempPath)
+	if err := permissions.SetPrivateFilePermissions(tempPath); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("error al proteger archivo temporal: %w", err)
+	}
 	if err := os.Rename(tempPath, f.filePath); err != nil {
+		_ = os.Remove(tempPath)
 		return err
 	}
-	_ = permissions.SetPrivateFilePermissions(f.filePath)
+	if err := permissions.SetPrivateFilePermissions(f.filePath); err != nil {
+		return fmt.Errorf("error al proteger archivo de sesión: %w", err)
+	}
 	return nil
 }
 
@@ -97,7 +106,7 @@ func (f *FileSessionStorage) Save(cookies string) error {
 
 	data, err := f.readData()
 	if err != nil {
-		data = make(map[string]any)
+		return err
 	}
 	data[f.key] = cookies
 	return f.writeData(data)
@@ -110,7 +119,7 @@ func (f *FileSessionStorage) Clear() error {
 
 	data, err := f.readData()
 	if err != nil {
-		return nil
+		return err
 	}
 	delete(data, f.key)
 	return f.writeData(data)

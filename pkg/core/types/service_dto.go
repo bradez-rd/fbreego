@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 // CookieInput representa una cookie HTTP con sus atributos de seguridad y vigencia.
 type CookieInput struct {
 	Name           string  `json:"name"`
@@ -20,11 +22,31 @@ type SessionCreateInput struct {
 	Cookies  []CookieInput `json:"cookies"`
 }
 
+// Constantes de tipos de conversación reconocidos.
+const (
+	ThreadTypeUser  = "user"
+	ThreadTypeGroup = "group"
+	ThreadTypeAIBot = "ai_bot" // Meta AI (código numérico 201 en Facebook LightSpeed)
+)
+
+// NormalizeThreadType normaliza cadenas o códigos numéricos legados (ej. "201" de Meta AI)
+// garantizando que bots y usuarios directos nunca se clasifiquen erróneamente como grupos.
+func NormalizeThreadType(threadType string) string {
+	switch strings.ToLower(strings.TrimSpace(threadType)) {
+	case "group", "2":
+		return ThreadTypeGroup
+	case "ai_bot", "201", "bot", "ai":
+		return ThreadTypeAIBot
+	default:
+		return ThreadTypeUser
+	}
+}
+
 // TextMessageInput representa la solicitud para enviar un mensaje de texto.
 type TextMessageInput struct {
 	ThreadID         string `json:"threadId"`
 	Text             string `json:"text"`
-	ThreadType       string `json:"threadType"` // "user" o "group", default "user"
+	ThreadType       string `json:"threadType"` // "user", "group" o "ai_bot" (201), default "user"
 	ReplyToMessageID string `json:"replyToMessageId,omitempty"`
 }
 

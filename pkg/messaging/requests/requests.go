@@ -8,18 +8,25 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const BatchURL = "https://www.facebook.com/api/graphqlbatch/"
+// BatchURL devuelve la URL canónica de GraphQLBatch configurada en el registro de contratos.
+func BatchURL() string {
+	return contracts.BatchQueryURL()
+}
 
 // GetPendingRequests obtiene los hilos y mensajes en espera en la bandeja de solicitudes de Messenger.
 func GetPendingRequests(ctx context.Context, client *http.Client, fb *types.DataFB) (map[string]any, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+
+	docID := contracts.DocID("MessageRequestsQuery")
+	queriesJSON := fmt.Sprintf(`{"o0":{"doc_id":"%s","query_params":{"folder_tag":"PENDING"}},"o1":{"doc_id":"%s","query_params":{"folder_tag":"OTHER"}}}`, docID, docID)
 
 	form := url.Values{
 		"fb_dtsg":  {fb.FbDtsg},
@@ -28,10 +35,10 @@ func GetPendingRequests(ctx context.Context, client *http.Client, fb *types.Data
 		"__a":      {"1"},
 		"__req":    {utils.NextRequestBase36()},
 		"__rev":    {fb.ClientRevision},
-		"queries":  {`{"o0":{"doc_id":"2289680371118670","query_params":{"folder_tag":"PENDING"}},"o1":{"doc_id":"2289680371118670","query_params":{"folder_tag":"OTHER"}}}`},
+		"queries":  {queriesJSON},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", BatchURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}

@@ -8,16 +8,26 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const (
-	ChangeNameURL     = "https://www.facebook.com/messaging/set_thread_name/"
-	ChangeEmojiURL    = "https://www.facebook.com/messaging/save_thread_emoji/"
-	ChangeNicknameURL = "https://www.facebook.com/messaging/save_thread_nickname/"
-)
+// ChangeNameURL devuelve la URL canónica para modificar el nombre de un grupo.
+func ChangeNameURL() string {
+	return contracts.SaveThreadNameURL()
+}
+
+// ChangeEmojiURL devuelve la URL canónica para modificar el emoji de un hilo.
+func ChangeEmojiURL() string {
+	return contracts.SaveThreadEmojiURL()
+}
+
+// ChangeNicknameURL devuelve la URL canónica para modificar el apodo de un participante.
+func ChangeNicknameURL() string {
+	return contracts.SaveThreadNicknameURL()
+}
 
 // ChangeThreadName actualiza el título o nombre visible de un grupo en Messenger.
 func ChangeThreadName(ctx context.Context, client *http.Client, fb *types.DataFB, threadID, newName string) (map[string]any, error) {
@@ -36,7 +46,7 @@ func ChangeThreadName(ctx context.Context, client *http.Client, fb *types.DataFB
 		"__rev":       {fb.ClientRevision},
 	}
 
-	return postForm(ctx, client, fb, ChangeNameURL, form)
+	return postForm(ctx, client, fb, ChangeNameURL(), form)
 }
 
 // ChangeEmoji cambia el emoji representativo de una conversación en Messenger.
@@ -56,7 +66,7 @@ func ChangeEmoji(ctx context.Context, client *http.Client, fb *types.DataFB, thr
 		"__rev":        {fb.ClientRevision},
 	}
 
-	return postForm(ctx, client, fb, ChangeEmojiURL, form)
+	return postForm(ctx, client, fb, ChangeEmojiURL(), form)
 }
 
 // ChangeNickname asigna o borra el apodo de un participante en una conversación de Messenger.
@@ -77,7 +87,7 @@ func ChangeNickname(ctx context.Context, client *http.Client, fb *types.DataFB, 
 		"__rev":                {fb.ClientRevision},
 	}
 
-	return postForm(ctx, client, fb, ChangeNicknameURL, form)
+	return postForm(ctx, client, fb, ChangeNicknameURL(), form)
 }
 
 func postForm(ctx context.Context, client *http.Client, fb *types.DataFB, endpoint string, form url.Values) (map[string]any, error) {

@@ -3,6 +3,7 @@ package edit
 import (
 	"encoding/json"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
@@ -17,6 +18,11 @@ func BuildEditContext(messageID, newText string) (string, error) {
 		return "", err
 	}
 
+	versionID := contracts.DocID("EditMessageVersion")
+	if versionID == "" {
+		versionID = contracts.DefaultVersionIDEditMessage
+	}
+
 	lsPayload := map[string]any{
 		"tasks": []map[string]any{
 			{
@@ -27,7 +33,7 @@ func BuildEditContext(messageID, newText string) (string, error) {
 			},
 		},
 		"epoch_id":   utils.GenerateSessionID(),
-		"version_id": "7191105584282302",
+		"version_id": versionID,
 	}
 
 	lsPayloadBytes, err := json.Marshal(lsPayload)

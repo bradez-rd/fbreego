@@ -8,15 +8,21 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const (
-	GraphQLURL   = "https://www.facebook.com/api/graphql/"
-	ThemeQueryID = "1761643933953838"
-)
+// GraphQLURL devuelve la URL canónica de GraphQL configurada en el registro de contratos.
+func GraphQLURL() string {
+	return contracts.GraphQLURL()
+}
+
+// ThemeQueryID devuelve el DocID configurado para MessagingThemeQuery.
+func ThemeQueryID() string {
+	return contracts.DocID("MessagingThemeQuery")
+}
 
 // ThemeMetadata describe un tema gráfico disponible en Facebook Messenger.
 type ThemeMetadata struct {
@@ -40,10 +46,11 @@ func ListThemes(ctx context.Context, client *http.Client, fb *types.DataFB) ([]T
 		return nil, err
 	}
 
-	form := utils.BuildFormAll(fb, "MessagingThemeQuery", ThemeQueryID, true)
+	queryID := contracts.DocID("MessagingThemeQuery")
+	form := utils.BuildFormAll(fb, "MessagingThemeQuery", queryID, true)
 	form.Set("variables", string(varBytes))
 
-	req, err := http.NewRequestWithContext(ctx, "POST", GraphQLURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.GraphQLURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}

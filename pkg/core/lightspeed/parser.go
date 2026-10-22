@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
@@ -47,7 +48,7 @@ func FetchLightSpeedData(ctx context.Context, client *http.Client, cookies strin
 		client = http.DefaultClient
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.facebook.com/messages/t/", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", contracts.MessagesBaseURL(), nil)
 	if err != nil {
 		return nil, err
 	}

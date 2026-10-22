@@ -8,18 +8,25 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const BatchQueryURL = "https://www.facebook.com/api/graphqlbatch/"
+// BatchQueryURL devuelve la URL canónica de GraphQLBatch configurada en el registro de contratos.
+func BatchQueryURL() string {
+	return contracts.BatchQueryURL()
+}
 
 // FetchAllThreads obtiene mediante una consulta GraphQLBatch la lista estructurada de conversaciones de la cuenta.
 func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB) (map[string]any, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+
+	docID := contracts.DocID("ThreadListQuery")
+	queriesJSON := fmt.Sprintf(`{"o0":{"doc_id":"%s","query_params":{"limit":20,"before":null,"tags":["INBOX"]}}}`, docID)
 
 	form := url.Values{
 		"fb_dtsg":  {fb.FbDtsg},
@@ -28,10 +35,10 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 		"__a":      {"1"},
 		"__req":    {utils.NextRequestBase36()},
 		"__rev":    {fb.ClientRevision},
-		"queries":  {`{"o0":{"doc_id":"2289680371118670","query_params":{"limit":20,"before":null,"tags":["INBOX"]}}}`},
+		"queries":  {queriesJSON},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", BatchQueryURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}

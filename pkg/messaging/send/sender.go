@@ -9,12 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const SendURL = "https://www.facebook.com/messaging/send/"
+// SendURL define la URL canónica para envío de mensajes desde contratos.
+var SendURL = contracts.SendURL()
 
 // SendText envía un mensaje de texto plano a un usuario o conversación grupal.
 func SendText(ctx context.Context, client *http.Client, fb *types.DataFB, input types.TextMessageInput) (map[string]any, error) {
@@ -84,7 +86,7 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		"__rev":                           {fb.ClientRevision},
 	}
 
-	if input.ThreadType == "group" {
+	if types.NormalizeThreadType(input.ThreadType) == types.ThreadTypeGroup {
 		form.Set("thread_fbid", input.ThreadID)
 	} else {
 		form.Set("other_user_fbid", input.ThreadID)
@@ -121,7 +123,7 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", SendURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.SendURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("error al construir petición de envío: %w", err)
 	}

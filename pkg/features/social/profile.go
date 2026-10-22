@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
@@ -57,7 +58,11 @@ func ToggleProfessionalMode(ctx context.Context, client *http.Client, fb *types.
 		return nil, err
 	}
 
-	form := utils.BuildFormAll(fb, "ProfessionalModeMutation", "4920194019284712", true)
+	docID := contracts.DocID("ProfessionalModeMutation")
+	if docID == "" {
+		docID = contracts.DefaultDocIDProfessionalMode
+	}
+	form := utils.BuildFormAll(fb, "ProfessionalModeMutation", docID, true)
 	form.Set("variables", string(varBytes))
 
 	return executePost(ctx, client, fb, GraphQLURL, form)

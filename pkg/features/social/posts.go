@@ -9,14 +9,16 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const (
-	GraphQLURL   = "https://www.facebook.com/api/graphql/"
-	CreatePostURL = "https://www.facebook.com/api/graphql/"
+// GraphQLURL y CreatePostURL obtienen las URLs canónicas desde el registro de contratos.
+var (
+	GraphQLURL   = contracts.GraphQLURL()
+	CreatePostURL = contracts.GraphQLURL()
 )
 
 // CreatePost publica un nuevo mensaje en el muro personal del usuario en Facebook.
@@ -91,10 +93,14 @@ func ArchivePost(ctx context.Context, client *http.Client, fb *types.DataFB, pos
 		return nil, err
 	}
 
-	form := utils.BuildFormAll(fb, "FeedStoryArchiveMutation", "5129402940471201", true)
+	docID := contracts.DocID("FeedStoryArchiveMutation")
+	if docID == "" {
+		docID = contracts.DefaultDocIDFeedStoryArchive
+	}
+	form := utils.BuildFormAll(fb, "FeedStoryArchiveMutation", docID, true)
 	form.Set("variables", string(varBytes))
 
-	return executePost(ctx, client, fb, GraphQLURL, form)
+	return executePost(ctx, client, fb, contracts.GraphQLURL(), form)
 }
 
 // ReactPost reacciona a una publicación de Facebook (LIKE, LOVE, CARE, HAHA, WOW, SAD, ANGRY).

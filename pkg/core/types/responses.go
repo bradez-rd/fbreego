@@ -1,6 +1,6 @@
 package types
 
-// SuccessResponse representa la respuesta estándar de éxito en fbchat_v2: {"success": 1, ...}
+// SuccessResponse representa la respuesta estándar de éxito en fbreego: {"success": 1, ...}
 type SuccessResponse struct {
 	Success  int            `json:"success"` // siempre 1
 	Payload  map[string]any `json:"payload,omitempty"`
@@ -8,7 +8,7 @@ type SuccessResponse struct {
 	Data     map[string]any `json:"data,omitempty"`
 }
 
-// ErrorResponse representa la respuesta estándar de error en fbchat_v2: {"error": 1, ...}
+// ErrorResponse representa la respuesta estándar de error en fbreego: {"error": 1, ...}
 type ErrorResponse struct {
 	Error    int            `json:"error"` // siempre 1
 	Payload  map[string]any `json:"payload,omitempty"`
@@ -21,7 +21,7 @@ type ErrorDetail struct {
 	Message string `json:"message"`
 }
 
-// ServiceResponse es la estructura estándar devuelta por los endpoints REST de fbchat-provider.
+// ServiceResponse es la estructura estándar devuelta por los endpoints REST de fbreego.
 type ServiceResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

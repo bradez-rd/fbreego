@@ -10,7 +10,41 @@ type CookieInput struct {
 type SessionCreateInput struct {
 	Label    string        `json:"label"`
 	TenantID string        `json:"tenantId"`
-	Cookies  []CookieInput `json:"cookies"`
+	Cookies  []CookieInput `json:"cookies,omitempty"`
+	Email    string        `json:"email,omitempty"`
+	Password string        `json:"password,omitempty"`
+	TOTPKey  string        `json:"totpKey,omitempty"`
+}
+
+// LoginCredentialsInput representa los datos para autenticar y registrar una sesión mediante correo y contraseña (+ 2FA opcional).
+type LoginCredentialsInput struct {
+	Label    string `json:"label,omitempty"`
+	TenantID string `json:"tenantId,omitempty"`
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password"`
+	TOTPKey  string `json:"totpKey,omitempty"`
+}
+
+// CredentialAuthInput representa la solicitud de login tradicional con usuario/correo y contraseña para fbreego.
+type CredentialAuthInput struct {
+	Label    string `json:"label,omitempty"`
+	TenantID string `json:"tenantId,omitempty"`
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password"`
+	TOTPKey  string `json:"totpKey,omitempty"`
+}
+
+// TwoFactorAuthInput representa la solicitud para completar la verificación 2FA con el desafío pendiente.
+type TwoFactorAuthInput struct {
+	ChallengeID string `json:"challengeId"`
+	Code        string `json:"code"`
+}
+
+// TOTPGenerateInput representa la solicitud para generar un código 2FA a partir de una clave secreta.
+type TOTPGenerateInput struct {
+	Key string `json:"key"`
 }
 
 // TextMessageInput representa la solicitud para enviar un mensaje de texto.

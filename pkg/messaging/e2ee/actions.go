@@ -36,6 +36,14 @@ func (b *BridgeActions) UnsendMessage(ctx context.Context, messageID string) (ma
 	})
 }
 
+// SendE2EETextMessage envía un mensaje de texto plano cifrado de extremo a extremo a un hilo personal.
+func (b *BridgeActions) SendE2EETextMessage(ctx context.Context, chatJID, text string) (map[string]any, error) {
+	return b.caller.Call(ctx, "sendE2EETextMessage", map[string]any{
+		"chatJid": chatJID,
+		"text":    text,
+	})
+}
+
 // EditE2EEMessage edita el texto de un mensaje en una conversación cifrada E2EE.
 func (b *BridgeActions) EditE2EEMessage(ctx context.Context, chatJID, messageID, newText string) (map[string]any, error) {
 	return b.caller.Call(ctx, "editE2EEMessage", map[string]any{

@@ -21,8 +21,13 @@ type DataFB struct {
 	Hash           string `json:"hash"`
 	SessionID      string `json:"sessionID"`
 	FacebookID     string `json:"FacebookID"`
-	ClientRevision string `json:"clientRevision"`
-	CookieFacebook string `json:"cookieFacebook"`
+	ClientRevision         string `json:"clientRevision"`
+	CookieFacebook         string `json:"cookieFacebook"`
+	EncryptedSerializedCat string `json:"encrypted_serialized_cat,omitempty"`
+	CatExpiration          int64  `json:"cat_expiration,omitempty"`
+	AppID                  int64  `json:"app_id,omitempty"`
+	WADeviceID             int    `json:"wa_device_id,omitempty"`
+	E2EEDeviceUUID         string `json:"e2ee_device_uuid,omitempty"`
 }
 
 // HasRequiredFields verifica si todos los campos requeridos de la sesión están presentes y son no vacíos.

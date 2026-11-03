@@ -1,15 +1,22 @@
 package api
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/bradez-rd/fbreego/pkg/core/auth"
 	"github.com/bradez-rd/fbreego/pkg/core/lightspeed"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/features/thread"
+	"github.com/bradez-rd/fbreego/pkg/messaging/listener"
 )
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +42,45 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Si no se proporcionaron cookies pero sí credenciales, realizar login primero
+	if len(input.Cookies) == 0 && input.Email != "" && input.Password != "" {
+		payload, err := auth.FB4ALogin(r.Context(), s.httpClient, input.Email, input.Password, input.TOTPKey)
+		if err != nil {
+			if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
+				JSONResponse(w, http.StatusForbidden, types.ServiceResponse{
+					Code:    "2FA_CHALLENGE_REQUIRED",
+					Message: "Facebook requiere completar la verificación 2FA / checkpoint.",
+					Results: map[string]any{
+						"status":       "challenge_required",
+						"code":         challengeErr.Code,
+						"subcode":      challengeErr.Subcode,
+						"title":        challengeErr.Title,
+						"description":  challengeErr.Description,
+						"challengeUrl": challengeErr.ChallengeURL,
+						"totpCode":     challengeErr.TOTPCode,
+						"fbtraceId":    challengeErr.FBTraceID,
+					},
+				})
+				return
+			}
+			JSONError(w, "LOGIN_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+			return
+		}
+
+		var cookies []types.CookieInput
+		for _, item := range payload.CookiesKeyValueList {
+			name, _ := item["name"].(string)
+			value, _ := item["value"].(string)
+			if name != "" && value != "" {
+				cookies = append(cookies, types.CookieInput{Name: name, Value: value})
+			}
+		}
+		input.Cookies = cookies
+		if input.Label == "" {
+			input.Label = input.Email
+		}
+	}
+
 	rec, err := s.Registry.Create(r.Context(), input)
 	if err != nil {
 		JSONError(w, "SESSION_VALIDATION_FAILED", err.Error(), http.StatusBadRequest, nil, "")
@@ -46,6 +92,289 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	pub := rec.Public()
 	pub["listenerStatus"] = "idle"
 	JSONSuccess(w, "Session created and validated successfully.", pub, http.StatusCreated)
+}
+
+func (s *Server) handleLoginSession(w http.ResponseWriter, r *http.Request) {
+	var input types.LoginCredentialsInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		JSONError(w, "INVALID_REQUEST", "The request payload is invalid.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+	identifier := strings.TrimSpace(input.Email)
+	if identifier == "" {
+		identifier = strings.TrimSpace(input.Username)
+	}
+	if identifier == "" || strings.TrimSpace(input.Password) == "" {
+		JSONError(w, "INVALID_CREDENTIALS", "Usuario/correo y contraseña son requeridos.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, identifier, input.Password, input.TOTPKey)
+	if err != nil {
+		if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
+			JSONResponse(w, http.StatusForbidden, types.ServiceResponse{
+				Code:    "2FA_CHALLENGE_REQUIRED",
+				Message: "Facebook requiere verificación 2FA / checkpoint.",
+				Results: map[string]any{
+					"status":       "challenge_required",
+					"code":         challengeErr.Code,
+					"subcode":      challengeErr.Subcode,
+					"title":        challengeErr.Title,
+					"description":  challengeErr.Description,
+					"challengeUrl": challengeErr.ChallengeURL,
+					"totpCode":     challengeErr.TOTPCode,
+					"fbtraceId":    challengeErr.FBTraceID,
+				},
+			})
+			return
+		}
+		JSONError(w, "LOGIN_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	var cookies []types.CookieInput
+	for _, item := range payload.CookiesKeyValueList {
+		name, _ := item["name"].(string)
+		value, _ := item["value"].(string)
+		if name != "" && value != "" {
+			cookies = append(cookies, types.CookieInput{Name: name, Value: value})
+		}
+	}
+
+	label := input.Label
+	if label == "" {
+		label = identifier
+	}
+
+	createInput := types.SessionCreateInput{
+		Label:    label,
+		TenantID: input.TenantID,
+		Cookies:  cookies,
+	}
+
+	rec, err := s.Registry.Create(r.Context(), createInput)
+	if err != nil {
+		JSONError(w, "SESSION_VALIDATION_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	s.RecordAudit("session_login", fmt.Sprintf("Session %s created via login", rec.SessionID), rec.SessionID)
+	s.EventHub.EmitSessionStatus(rec.SessionID, rec.Status, "")
+	pub := rec.Public()
+	pub["listenerStatus"] = "idle"
+	JSONSuccess(w, "Session authenticated and created successfully.", pub, http.StatusCreated)
+}
+
+// handleCredentialsLogin implementa la API de login con usuario/contraseña compatible con el adaptador fbreego de SocialManager.
+func (s *Server) handleCredentialsLogin(w http.ResponseWriter, r *http.Request) {
+	var input types.CredentialAuthInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		JSONError(w, "INVALID_REQUEST", "The request payload is invalid.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	username := strings.TrimSpace(input.Username)
+	if username == "" {
+		username = strings.TrimSpace(input.Email)
+	}
+	password := input.Password
+	if username == "" || strings.TrimSpace(password) == "" {
+		JSONError(w, "INVALID_CREDENTIALS", "Usuario/correo y contraseña son requeridos.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, username, password, input.TOTPKey)
+	if err != nil {
+		if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
+			b := make([]byte, 16)
+			_, _ = rand.Read(b)
+			challengeID := "chal_" + base64.RawURLEncoding.EncodeToString(b)
+			expiresAt := time.Now().Add(10 * time.Minute)
+
+			s.challengesMu.Lock()
+			s.challenges[challengeID] = Pending2FAChallenge{
+				ChallengeID:  challengeID,
+				Username:     username,
+				Password:     password,
+				Label:        input.Label,
+				TenantID:     input.TenantID,
+				ExpiresAt:    expiresAt,
+				ChallengeURL: challengeErr.ChallengeURL,
+			}
+			s.challengesMu.Unlock()
+
+			// Respuesta estandarizada esperada por el adaptador de SocialManager y frontend
+			JSONSuccess(w, "Facebook requiere código 2FA.", map[string]any{
+				"status":       "2FA_REQUIRED",
+				"challengeId":  challengeID,
+				"expiresAt":    expiresAt.Format(time.RFC3339),
+				"challengeUrl": challengeErr.ChallengeURL,
+				"totpCode":     challengeErr.TOTPCode,
+			}, http.StatusOK)
+			return
+		}
+
+		JSONError(w, "LOGIN_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	var cookies []types.CookieInput
+	for _, item := range payload.CookiesKeyValueList {
+		name, _ := item["name"].(string)
+		value, _ := item["value"].(string)
+		if name != "" && value != "" {
+			cookies = append(cookies, types.CookieInput{Name: name, Value: value})
+		}
+	}
+
+	label := input.Label
+	if label == "" {
+		label = username
+	}
+
+	createInput := types.SessionCreateInput{
+		Label:    label,
+		TenantID: input.TenantID,
+		Cookies:  cookies,
+	}
+
+	rec, err := s.Registry.Create(r.Context(), createInput)
+	if err != nil {
+		JSONError(w, "SESSION_VALIDATION_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	s.RecordAudit("session_login", fmt.Sprintf("Session %s created via credentials", rec.SessionID), rec.SessionID)
+	s.EventHub.EmitSessionStatus(rec.SessionID, rec.Status, "")
+	pub := rec.Public()
+	pub["listenerStatus"] = "idle"
+	JSONSuccess(w, "Session authenticated and created successfully.", pub, http.StatusOK)
+}
+
+// handleCompleteTwoFactor verifica el código 2FA ingresado por el usuario y finaliza la creación de la sesión.
+func (s *Server) handleCompleteTwoFactor(w http.ResponseWriter, r *http.Request) {
+	var input types.TwoFactorAuthInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		JSONError(w, "INVALID_REQUEST", "The request payload is invalid.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	challengeID := strings.TrimSpace(input.ChallengeID)
+	code := strings.TrimSpace(input.Code)
+	if challengeID == "" || code == "" {
+		JSONError(w, "INVALID_INPUT", "challengeId y code son requeridos.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	s.challengesMu.Lock()
+	chal, exists := s.challenges[challengeID]
+	if exists {
+		delete(s.challenges, challengeID)
+	}
+	s.challengesMu.Unlock()
+
+	if !exists || time.Now().After(chal.ExpiresAt) {
+		JSONError(w, "CHALLENGE_EXPIRED", "El desafío 2FA no existe o ha expirado.", http.StatusGone, nil, "")
+		return
+	}
+
+	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, chal.Username, chal.Password, code)
+	if err != nil {
+		JSONError(w, "2FA_VERIFICATION_FAILED", fmt.Sprintf("Error al verificar código 2FA: %v", err), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	var cookies []types.CookieInput
+	for _, item := range payload.CookiesKeyValueList {
+		name, _ := item["name"].(string)
+		value, _ := item["value"].(string)
+		if name != "" && value != "" {
+			cookies = append(cookies, types.CookieInput{Name: name, Value: value})
+		}
+	}
+
+	label := chal.Label
+	if label == "" {
+		label = chal.Username
+	}
+
+	createInput := types.SessionCreateInput{
+		Label:    label,
+		TenantID: chal.TenantID,
+		Cookies:  cookies,
+	}
+
+	rec, err := s.Registry.Create(r.Context(), createInput)
+	if err != nil {
+		JSONError(w, "SESSION_VALIDATION_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	s.RecordAudit("session_2fa_complete", fmt.Sprintf("Session %s created after 2FA verification", rec.SessionID), rec.SessionID)
+	s.EventHub.EmitSessionStatus(rec.SessionID, rec.Status, "")
+	pub := rec.Public()
+	pub["listenerStatus"] = "idle"
+	JSONSuccess(w, "Session authenticated and created successfully after 2FA.", pub, http.StatusOK)
+}
+
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	var input types.LoginCredentialsInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		JSONError(w, "INVALID_REQUEST", "The request payload is invalid.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+	if strings.TrimSpace(input.Email) == "" || strings.TrimSpace(input.Password) == "" {
+		JSONError(w, "INVALID_CREDENTIALS", "Email y password son requeridos.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, input.Email, input.Password, input.TOTPKey)
+	if err != nil {
+		if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
+			JSONResponse(w, http.StatusForbidden, types.ServiceResponse{
+				Code:    "2FA_CHALLENGE_REQUIRED",
+				Message: "Facebook requiere verificación 2FA / checkpoint.",
+				Results: map[string]any{
+					"status":       "challenge_required",
+					"code":         challengeErr.Code,
+					"subcode":      challengeErr.Subcode,
+					"title":        challengeErr.Title,
+					"description":  challengeErr.Description,
+					"challengeUrl": challengeErr.ChallengeURL,
+					"totpCode":     challengeErr.TOTPCode,
+					"fbtraceId":    challengeErr.FBTraceID,
+				},
+			})
+			return
+		}
+		JSONError(w, "LOGIN_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	JSONSuccess(w, "FB4A authentication successful.", payload, http.StatusOK)
+}
+
+func (s *Server) handleGenerateTOTP(w http.ResponseWriter, r *http.Request) {
+	var input types.TOTPGenerateInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		JSONError(w, "INVALID_REQUEST", "The request payload is invalid.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+	if strings.TrimSpace(input.Key) == "" {
+		JSONError(w, "INVALID_KEY", "La clave TOTP es requerida.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	code, remaining, err := auth.CurrentTOTP(input.Key)
+	if err != nil {
+		JSONError(w, "TOTP_GENERATION_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	JSONSuccess(w, "TOTP code generated successfully.", types.TOTPResponse{
+		Code:             code,
+		RemainingSeconds: remaining,
+	}, http.StatusOK)
 }
 
 func (s *Server) handleGetSessionStatus(w http.ResponseWriter, r *http.Request) {
@@ -108,8 +437,77 @@ func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
 		return
 	}
+	if rec.ProviderData == nil {
+		JSONError(w, "SESSION_NOT_VALIDATED", "Session does not have active provider data.", http.StatusBadRequest, nil, "")
+		return
+	}
 
-	JSONError(w, "LISTENER_NOT_IMPLEMENTED", "The Messenger realtime transport is not available in this build.", http.StatusNotImplemented, map[string]any{"sessionId": rec.SessionID}, "")
+	if s.ListenerManager == nil {
+		JSONError(w, "LISTENER_UNAVAILABLE", "Listener manager is not initialized.", http.StatusServiceUnavailable, nil, "")
+		return
+	}
+
+	mqttListener := listener.NewMQTTListener(rec.ProviderData)
+
+	worker := func(ctx context.Context) {
+		if err := mqttListener.Start(ctx); err != nil {
+			s.RecordAudit("listener_error", err.Error(), sessionID)
+			return
+		}
+		defer mqttListener.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-mqttListener.Messages():
+				if !ok {
+					return
+				}
+				s.Registry.RecordActivity(sessionID)
+				eventName := string(msg.EventType)
+				if eventName == "" {
+					eventName = string(listener.MessageReceived)
+				}
+
+				eventPayload := map[string]any{
+					"sessionId":  sessionID,
+					"threadId":   msg.ThreadID,
+					"messageId":  msg.MessageID,
+					"senderId":   msg.SenderID,
+					"text":       msg.Body,
+					"timestamp":  msg.TimestampMs,
+					"isGroup":    msg.IsGroup,
+					"threadType": msg.ThreadType,
+				}
+
+				if s.EventHub != nil {
+					envelope := map[string]any{
+						"event":     eventName,
+						"sessionId": sessionID,
+						"data":      eventPayload,
+					}
+					if msg.TimestampMs > 0 {
+						envelope["timestamp"] = time.UnixMilli(msg.TimestampMs).UTC().Format(time.RFC3339Nano)
+					}
+					s.EventHub.Publish(envelope)
+				} else if s.Dispatcher != nil {
+					s.Dispatcher.Enqueue(eventName, eventPayload)
+				}
+			}
+		}
+	}
+
+	if err := s.ListenerManager.StartListening(context.Background(), sessionID, worker); err != nil {
+		JSONError(w, "LISTENER_START_FAILED", err.Error(), http.StatusBadRequest, nil, "")
+		return
+	}
+
+	s.RecordAudit("listener_start", "MQTT listener started", sessionID)
+	JSONSuccess(w, "Session listener started successfully.", map[string]any{
+		"sessionId": sessionID,
+		"status":    "listening",
+	}, http.StatusOK)
 }
 
 func (s *Server) handleStopListening(w http.ResponseWriter, r *http.Request) {
@@ -149,12 +547,30 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	threadsData, err := thread.FetchAllThreads(r.Context(), s.httpClient, rec.ProviderData)
-	if err != nil {
-		// Fallback con LightSpeed HTML parser
-		lsData, _ := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, rec.BuildCookieHeader())
-		JSONSuccess(w, "Threads retrieved via LightSpeed fallback.", lsData, http.StatusOK)
-		return
+	if err == nil {
+		items := thread.ExtractThreadItems(threadsData)
+		if len(items) > 0 {
+			JSONSuccess(w, "Threads retrieved successfully.", map[string]any{
+				"items": items,
+				"count": len(items),
+			}, http.StatusOK)
+			return
+		}
 	}
 
-	JSONSuccess(w, "Threads retrieved successfully.", threadsData, http.StatusOK)
+	// Fallback con LightSpeed HTML parser
+	lsData, _ := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, rec.BuildCookieHeader())
+	var fallbackItems []map[string]any
+	for _, t := range lsData {
+		fallbackItems = append(fallbackItems, map[string]any{
+			"threadId":    t.ThreadID,
+			"name":        t.Name,
+			"type":        "user",
+			"unreadCount": t.UnreadCount,
+		})
+	}
+	JSONSuccess(w, "Threads retrieved via LightSpeed fallback.", map[string]any{
+		"items": fallbackItems,
+		"count": len(fallbackItems),
+	}, http.StatusOK)
 }

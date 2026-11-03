@@ -1,0 +1,10 @@
+.git
+.runtime
+bin
+dist
+facebook-research
+reports
+tests
+*.exe
+*.test
+.fbreego_*

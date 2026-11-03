@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 	"github.com/bradez-rd/fbreego/pkg/core/permissions"
 )
 
@@ -64,12 +65,12 @@ type WebhookConfigStore struct {
 // NewWebhookConfigStore crea una nueva instancia del almacén de configuración de webhook.
 func NewWebhookConfigStore(stateDir string) *WebhookConfigStore {
 	if stateDir == "" {
-		stateDir = ".fbchat_sessions"
+		stateDir = coreconfig.DataDir("FBREEGO_SESSIONS_DIR", ".fbreego_sessions")
 	}
 	store := &WebhookConfigStore{stateDir: stateDir}
-	secret := strings.TrimSpace(os.Getenv("FBCHAT_SESSION_SECRET"))
+	secret := coreconfig.Value("FBREEGO_SESSION_SECRET")
 	if len(secret) < 32 {
-		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET debe contener al menos 32 caracteres")
+		store.initErr = fmt.Errorf("FBREEGO_SESSION_SECRET debe contener al menos 32 caracteres")
 		store.cached = &WebhookConfig{Enabled: false, Events: []string{}}
 		return store
 	}

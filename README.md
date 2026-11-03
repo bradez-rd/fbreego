@@ -12,16 +12,16 @@ Implementado y conectado:
 - envío de texto, reacciones, unsend y mensajes con adjuntos previamente cargados;
 - consultas sociales, threads y Marketplace disponibles en la API;
 - staging local de medios;
-- WebSocket para eventos generados por el servicio;
+- transporte realtime/MQTT para mensajes normales y ediciones, con clasificación directa de Meta AI (`threadType 201`);
+- WebSocket para eventos generados por el servicio y recibidos del listener;
 - webhooks HMAC con cola, reintentos y protección SSRF;
 - OpenAPI en `/openapi.json` y Swagger UI en `/docs`.
 
 No disponible todavía:
 
-- transporte realtime/MQTT para recibir mensajes desde Messenger;
 - backend criptográfico E2EE real.
 
-Esas capacidades se reportan como no disponibles; no devuelven éxitos simulados. Por ello, los WebSocket y webhooks reciben eventos producidos por operaciones locales, pero no mensajes entrantes desde Facebook.
+La capacidad E2EE se reporta como no disponible y no devuelve éxitos simulados. El listener MQTT normaliza payloads realtime conocidos y publica `message.received`/`message.edited` hacia WebSocket y webhook; los cambios privados del protocolo de Meta pueden requerir adaptar nuevamente el decodificador.
 
 ## Requisitos y compilación
 
@@ -38,9 +38,9 @@ go build -o fbreego ./cmd/fbreego
 La autenticación está habilitada por defecto. El servicio requiere una clave de almacenamiento de al menos 32 caracteres y credenciales Basic completas.
 
 ```bash
-export FBCHAT_SESSION_SECRET="replace-with-at-least-32-random-characters"
-export FBCHAT_API_USERNAME="admin"
-export FBCHAT_API_PASSWORD="replace-with-a-strong-password"
+export FBREEGO_SESSION_SECRET="replace-with-at-least-32-random-characters"
+export FBREEGO_API_USERNAME="admin"
+export FBREEGO_API_PASSWORD="replace-with-a-strong-password"
 ./fbreego --port 8000
 ```
 
@@ -48,18 +48,19 @@ Variables relevantes:
 
 | Variable | Predeterminado | Uso |
 |---|---:|---|
-| `PORT` | `8000` | Puerto HTTP; también se puede usar `--port`. |
-| `FBCHAT_SESSIONS_DIR` | `.fbchat_sessions` | Sesiones y configuración de webhook cifradas. |
-| `FBCHAT_SESSION_SECRET` | sin valor | Obligatoria, mínimo 32 caracteres. |
-| `FBCHAT_API_AUTH_REQUIRED` | `true` | Solo use `false` explícitamente en desarrollo local. |
-| `FBCHAT_API_USERNAME` | sin valor | Usuario de autenticación HTTP Basic. |
-| `FBCHAT_API_PASSWORD` | sin valor | Contraseña de autenticación HTTP Basic. |
-| `FBCHAT_API_CORS_ORIGINS` | sin orígenes | Lista separada por comas. `*` no habilita credenciales. |
-| `FBCHAT_API_WS_ORIGINS` | sin orígenes | Patrones de origen WebSocket separados por comas. |
-| `FBCHAT_TRAFFIC_ENABLED` | `false` | Activa el inspector de tráfico con vistas previas acotadas y redactadas. |
-| `FBCHAT_ENABLE_E2E_TEST_ENDPOINT` | `false` | Expone la suite operativa `/api/v1/tests/e2e`; solo para entornos aislados. |
+| `FBREEGO_PORT` | `8000` | Puerto HTTP; también se puede usar `--port`. |
+| `FBREEGO_SESSIONS_DIR` | `.fbreego_sessions` | Sesiones y configuración de webhook cifradas. |
+| `FBREEGO_MEDIA_DIR` | `.fbreego_media` | Archivos multimedia temporales. |
+| `FBREEGO_SESSION_SECRET` | sin valor | Obligatoria, mínimo 32 caracteres. |
+| `FBREEGO_API_AUTH_REQUIRED` | `true` | Solo use `false` explícitamente en desarrollo local. |
+| `FBREEGO_API_USERNAME` | sin valor | Usuario de autenticación HTTP Basic. |
+| `FBREEGO_API_PASSWORD` | sin valor | Contraseña de autenticación HTTP Basic. |
+| `FBREEGO_API_CORS_ORIGINS` | sin orígenes | Lista separada por comas. `*` no habilita credenciales. |
+| `FBREEGO_API_WS_ORIGINS` | sin orígenes | Patrones de origen WebSocket separados por comas. |
+| `FBREEGO_TRAFFIC_ENABLED` | `false` | Activa el inspector de tráfico con vistas previas acotadas y redactadas. |
+| `FBREEGO_ENABLE_E2E_TEST_ENDPOINT` | `false` | Expone la suite operativa `/api/v1/tests/e2e`; solo para entornos aislados. |
 
-El proceso se niega a inicializar el almacenamiento persistente si falta `FBCHAT_SESSION_SECRET`. Los identificadores `tenantId` están restringidos a un segmento seguro de 1–64 caracteres.
+El proceso se niega a inicializar el almacenamiento persistente si falta `FBREEGO_SESSION_SECRET`. Los identificadores `tenantId` están restringidos a un segmento seguro de 1–64 caracteres.
 
 ## Uso de la API
 
@@ -68,7 +69,7 @@ La lista autoritativa de rutas está en Swagger UI (`/docs`). Salvo `/healthz`, 
 Crear una sesión:
 
 ```bash
-curl -u "$FBCHAT_API_USERNAME:$FBCHAT_API_PASSWORD" \
+curl -u "$FBREEGO_API_USERNAME:$FBREEGO_API_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{
     "label": "cuenta-prueba",
@@ -84,7 +85,7 @@ curl -u "$FBCHAT_API_USERNAME:$FBCHAT_API_PASSWORD" \
 Enviar texto:
 
 ```bash
-curl -u "$FBCHAT_API_USERNAME:$FBCHAT_API_PASSWORD" \
+curl -u "$FBREEGO_API_USERNAME:$FBREEGO_API_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{"threadId":"123456789","threadType":"user","text":"Hola"}' \
   http://localhost:8000/api/v1/sessions/SESSION_ID/messages/text
@@ -107,7 +108,7 @@ Los destinos se limitan a HTTP/HTTPS públicos en sus puertos estándar (80/443)
 
 - No exponga el servicio directamente a Internet sin TLS y un proxy de confianza.
 - No habilite el inspector de tráfico ni el endpoint E2E en producción salvo una necesidad explícita.
-- Rote `FBCHAT_SESSION_SECRET` mediante un procedimiento de migración; cambiarla vuelve ilegibles los archivos ya cifrados.
+- Rote `FBREEGO_SESSION_SECRET` mediante un procedimiento de migración; cambiarla vuelve ilegibles los archivos ya cifrados.
 - No registre ni comparta cookies `c_user`, `xs`, `fb_dtsg` u otros tokens de sesión.
 
 ## Licencia

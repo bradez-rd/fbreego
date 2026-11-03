@@ -51,3 +51,36 @@ func ParseFacebookJSON(raw []byte, stripForLoopPrefix bool) (map[string]any, err
 
 	return res, nil
 }
+
+// ParseGraphQLBatchResponse decodifica una respuesta de GraphQL batch de Facebook, soportando múltiples objetos JSON concatenados (NDJSON / stream).
+func ParseGraphQLBatchResponse(raw []byte) (map[string]any, error) {
+	trimmed := bytes.TrimSpace(raw)
+	prefix := []byte("for (;;);")
+	if bytes.HasPrefix(trimmed, prefix) {
+		trimmed = bytes.TrimSpace(trimmed[len(prefix):])
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+
+	for decoder.More() {
+		var chunk map[string]any
+		if err := decoder.Decode(&chunk); err != nil {
+			break
+		}
+		if _, ok := chunk["o0"]; ok {
+			return chunk, nil
+		}
+		if _, ok := chunk["data"]; ok {
+			return map[string]any{"o0": chunk}, nil
+		}
+	}
+
+	// Fallback estándar si viene como un solo objeto JSON
+	var fallback map[string]any
+	if err := json.Unmarshal(trimmed, &fallback); err == nil {
+		return fallback, nil
+	}
+
+	return nil, fmt.Errorf("no se encontró el objeto o0 en la respuesta de graphqlbatch")
+}

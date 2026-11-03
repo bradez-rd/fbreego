@@ -33,16 +33,16 @@ func (m *mockRewriteTransport) RoundTrip(req *http.Request) (*http.Response, err
 }
 
 func setupTestServer(t *testing.T) (*httptest.Server, *testutil.MockFacebookServer, func()) {
-	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
-	t.Setenv("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", "1")
-	t.Setenv("FBCHAT_TRAFFIC_ENABLED", "1")
+	t.Setenv("FBREEGO_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
+	t.Setenv("FBREEGO_ENABLE_E2E_TEST_ENDPOINT", "1")
+	t.Setenv("FBREEGO_TRAFFIC_ENABLED", "1")
 	tmpDir, err := os.MkdirTemp("", "fbreego_e2e_*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	prevAuth := os.Getenv("FBCHAT_API_AUTH_REQUIRED")
-	_ = os.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	prevAuth := os.Getenv("FBREEGO_API_AUTH_REQUIRED")
+	_ = os.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
 
 	fbMock := testutil.NewMockFacebookServer()
 	mockTarget, _ := url.Parse(fbMock.URL)
@@ -80,7 +80,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *testutil.MockFacebookServ
 		ts.Close()
 		fbMock.Close()
 		_ = os.RemoveAll(tmpDir)
-		_ = os.Setenv("FBCHAT_API_AUTH_REQUIRED", prevAuth)
+		_ = os.Setenv("FBREEGO_API_AUTH_REQUIRED", prevAuth)
 	}
 
 	return ts, fbMock, cleanup
@@ -136,7 +136,7 @@ func TestE2E_FullFlow(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
-		if !bytes.Contains(body, []byte("fbchat_v2")) && !bytes.Contains(body, []byte("fbreego")) && !bytes.Contains(body, []byte("html")) {
+		if !bytes.Contains(body, []byte("fbreego")) && !bytes.Contains(body, []byte("html")) {
 			t.Errorf("portal response does not look like valid HTML")
 		}
 	})

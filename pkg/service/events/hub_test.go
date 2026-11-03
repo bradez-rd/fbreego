@@ -81,3 +81,29 @@ func TestRealtimeHubPublishesToDispatcher(t *testing.T) {
 		t.Fatalf("unexpected payload: %v", dispatcher.payload)
 	}
 }
+
+func TestRealtimeHubDispatchesCanonicalNestedPayloadOnce(t *testing.T) {
+	hub := NewRealtimeHub()
+	dispatcher := &recordingDispatcher{}
+	hub.SetDispatcher(dispatcher)
+
+	hub.Publish(map[string]any{
+		"event":     "message.edited",
+		"sessionId": "sess_1",
+		"data": map[string]any{
+			"messageId": "mid.1",
+			"threadId":  "thread.1",
+			"text":      "updated",
+		},
+	})
+
+	if dispatcher.eventName != "message.edited" {
+		t.Fatalf("expected message.edited dispatch, got %q", dispatcher.eventName)
+	}
+	if dispatcher.payload["messageId"] != "mid.1" || dispatcher.payload["sessionId"] != "sess_1" {
+		t.Fatalf("unexpected canonical payload: %#v", dispatcher.payload)
+	}
+	if _, nested := dispatcher.payload["data"]; nested {
+		t.Fatalf("dispatcher payload must not keep the websocket data envelope: %#v", dispatcher.payload)
+	}
+}

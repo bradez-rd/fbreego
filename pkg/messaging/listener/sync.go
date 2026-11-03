@@ -4,14 +4,25 @@ import (
 	"sync/atomic"
 )
 
+// MessageEventType identifies the canonical provider event produced by a
+// decoded Messenger realtime payload.
+type MessageEventType string
+
+const (
+	MessageReceived MessageEventType = "message.received"
+	MessageEdited   MessageEventType = "message.edited"
+)
+
 // DeltaMessage representa un mensaje entrante decodificado desde el broker MQTT de Facebook.
 type DeltaMessage struct {
-	MessageID   string `json:"messageId"`
-	ThreadID    string `json:"threadId"`
-	SenderID    string `json:"senderId"`
-	Body        string `json:"body"`
-	TimestampMs int64  `json:"timestampMs"`
-	IsGroup     bool   `json:"isGroup"`
+	EventType   MessageEventType `json:"eventType"`
+	MessageID   string           `json:"messageId"`
+	ThreadID    string           `json:"threadId"`
+	SenderID    string           `json:"senderId"`
+	Body        string           `json:"body"`
+	TimestampMs int64            `json:"timestampMs"`
+	IsGroup     bool             `json:"isGroup"`
+	ThreadType  string           `json:"threadType,omitempty"`
 }
 
 // SyncManager gestiona atómicamente el número de secuencia seq_id para evitar mensajes duplicados o saltos en la sincronización.

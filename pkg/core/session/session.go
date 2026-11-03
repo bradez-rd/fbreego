@@ -29,28 +29,80 @@ func ExtractBetween(html, start, end string) string {
 
 // ParseHomeResponse analiza el contenido HTML devuelto por la portada de Facebook y extrae los tokens de sesión.
 func ParseHomeResponse(html, setCookies string) (*types.DataFB, error) {
+	// Detección proactiva de Checkpoint o Bloqueo Temporal
+	if strings.Contains(html, "/checkpoint/") ||
+		strings.Contains(html, "checkpointProvider") ||
+		strings.Contains(html, "id=\"checkpointSubmitButton\"") ||
+		strings.Contains(html, "login_approval") {
+		return nil, fmt.Errorf("CHECKPOINT_DETECTADO: Facebook requiere verificación de seguridad. Inicia sesión en un navegador normal para resolver el desafío antes de continuar y proteger la cuenta")
+	}
+
+	fbDtsg := ExtractBetween(html, `DTSGInitialData",[],{"token":"`, `"`)
+	if fbDtsg == "" {
+		fbDtsg = ExtractBetween(html, `["DTSGInitialData",[],{"token":"`, `"`)
+	}
+	if fbDtsg == "" {
+		fbDtsg = ExtractBetween(html, `["DTSGInitData",[],{"token":"`, `"`)
+	}
+	if fbDtsg == "" {
+		fbDtsg = ExtractBetween(html, `"dtsg":{"token":"`, `"`)
+	}
+
+	actorID := ExtractBetween(html, `"actorID":"`, `"`)
+	if actorID == "" {
+		actorID = ExtractBetween(html, `"USER_ID":"`, `"`)
+	}
+	if actorID == "" {
+		actorID = ExtractBetween(setCookies, `c_user=`, `;`)
+	}
+	if actorID == "" {
+		// Por si c_user es la última cookie de la cadena
+		idx := strings.Index(setCookies, "c_user=")
+		if idx != -1 {
+			rem := setCookies[idx+7:]
+			endIdx := strings.IndexAny(rem, "; \r\n")
+			if endIdx != -1 {
+				actorID = rem[:endIdx]
+			} else {
+				actorID = rem
+			}
+		}
+	}
+
+	clientRev := ExtractBetween(html, `client_revision":`, `,`)
+	if clientRev == "" {
+		clientRev = ExtractBetween(html, `"client_revision":`, `,`)
+	}
+	if clientRev == "" {
+		clientRev = "1018898124"
+	}
+
+	sessID := ExtractBetween(html, `sessionId":"`, `"`)
+	if sessID == "" {
+		sessID = "1"
+	}
+
+	jazoest := ExtractBetween(html, `jazoest=`, `"`)
+	if jazoest == "" {
+		jazoest = ExtractBetween(html, `name="jazoest" value="`, `"`)
+	}
+	if jazoest == "" && fbDtsg != "" {
+		var sum int
+		for _, r := range fbDtsg {
+			sum += int(r)
+		}
+		jazoest = fmt.Sprintf("2%d", sum)
+	}
+
 	data := &types.DataFB{
-		FbDtsg:         ExtractBetween(html, `DTSGInitialData",[],{"token":"`, `"`),
+		FbDtsg:         fbDtsg,
 		FbDtsgAg:       ExtractBetween(html, `async_get_token":"`, `"`),
-		Jazoest:        ExtractBetween(html, `jazoest=`, `"`),
+		Jazoest:        jazoest,
 		Hash:           ExtractBetween(html, `hash":"`, `"`),
-		SessionID:      ExtractBetween(html, `sessionId":"`, `"`),
-		FacebookID:     ExtractBetween(html, `"actorID":"`, `"`),
-		ClientRevision: ExtractBetween(html, `client_revision":`, `,`),
+		SessionID:      sessID,
+		FacebookID:     actorID,
+		ClientRevision: clientRev,
 		CookieFacebook: setCookies,
-	}
-
-	// Si no encuentra jazoest en URL o atributo directo, intentar en input de formulario
-	if data.Jazoest == "" {
-		data.Jazoest = ExtractBetween(html, `name="jazoest" value="`, `"`)
-	}
-
-	// Si no encuentra actorID con comillas dobles, intentar búsqueda alternativa de USER_ID
-	if data.FacebookID == "" {
-		data.FacebookID = ExtractBetween(html, `"USER_ID":"`, `"`)
-	}
-	if data.FacebookID == "" {
-		data.FacebookID = ExtractBetween(html, `c_user=`, `;`)
 	}
 
 	ok, missing := data.HasRequiredFields()
@@ -93,14 +145,17 @@ func ExtractSession(ctx context.Context, client *http.Client, setCookies string,
 
 	req.Header.Set("Authority", "www.facebook.com")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+	req.Header.Set("Accept-Language", "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7")
 	req.Header.Set("Cookie", setCookies)
 	req.Header.Set("Sec-Fetch-Dest", "document")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Set("Sec-Fetch-Site", "none")
 	req.Header.Set("Sec-Fetch-User", "?1")
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("sec-ch-ua", `"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"`)
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-platform", `"Windows"`)
 
 	resp, err := client.Do(req)
 	if err != nil {

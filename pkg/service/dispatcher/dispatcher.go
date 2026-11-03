@@ -144,7 +144,7 @@ func (d *Dispatcher) deliverWithRetry(ctx context.Context, eventName string, pay
 			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", "fbchat-provider/webhook-dispatcher")
+		req.Header.Set("User-Agent", "fbreego/webhook-dispatcher")
 
 		if cfg.Secret != "" {
 			mac := hmac.New(sha256.New, []byte(cfg.Secret))
@@ -202,7 +202,7 @@ func (d *Dispatcher) TestProbe(ctx context.Context, targetURL, secret string) (m
 	probePayload := map[string]any{
 		"event":     "webhook.test",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"message":   "fbchat-provider test ping",
+		"message":   "fbreego test ping",
 	}
 	raw, _ := json.Marshal(probePayload)
 
@@ -211,7 +211,7 @@ func (d *Dispatcher) TestProbe(ctx context.Context, targetURL, secret string) (m
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "fbchat-provider/webhook-test")
+	req.Header.Set("User-Agent", "fbreego/webhook-test")
 
 	if secret != "" {
 		mac := hmac.New(sha256.New, []byte(secret))

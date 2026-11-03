@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 	"github.com/bradez-rd/fbreego/pkg/core/permissions"
 )
 
@@ -41,18 +42,13 @@ func ValidateTenantID(tenantID string) error {
 // NewEncryptedSessionStore crea un nuevo almacén cifrado en la ruta indicada o en el directorio por defecto.
 func NewEncryptedSessionStore(stateDir string) *EncryptedSessionStore {
 	if stateDir == "" {
-		envDir := os.Getenv("FBCHAT_SESSIONS_DIR")
-		if envDir != "" {
-			stateDir = envDir
-		} else {
-			stateDir = ".fbchat_sessions"
-		}
+		stateDir = coreconfig.DataDir("FBREEGO_SESSIONS_DIR", ".fbreego_sessions")
 	}
 
 	store := &EncryptedSessionStore{stateDir: stateDir}
-	secret := strings.TrimSpace(os.Getenv("FBCHAT_SESSION_SECRET"))
+	secret := coreconfig.Value("FBREEGO_SESSION_SECRET")
 	if len(secret) < 32 {
-		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET debe contener al menos 32 caracteres")
+		store.initErr = fmt.Errorf("FBREEGO_SESSION_SECRET debe contener al menos 32 caracteres")
 		return store
 	}
 	hash := sha256.Sum256([]byte(secret))

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -26,6 +27,19 @@ var twoFactorSubcodes = map[int]bool{
 	1348023: true,
 }
 
+func readResponseBody(resp *http.Response) ([]byte, error) {
+	var reader io.Reader = resp.Body
+	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		reader = gz
+	}
+	return io.ReadAll(reader)
+}
+
 // randomUUID genera un UUID v4 pseudoaleatorio para los campos de dispositivo de FB4A.
 func randomUUID() string {
 	var b [16]byte
@@ -33,6 +47,71 @@ func randomUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+func randomAlphaNum(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = letters[int(b[i])%len(letters)]
+	}
+	return string(b)
+}
+
+func fb4aHeaders() http.Header {
+	return http.Header{
+		"Host":                    {"b-graph.facebook.com"},
+		"User-Agent":              {LegacyFB4AUserAgent},
+		"Content-Type":            {"application/x-www-form-urlencoded"},
+		"Accept-Language":         {"es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7"},
+		"X-Fb-Connection-Type":    {"unknown"},
+		"X-Fb-Connection-Quality": {"EXCELLENT"},
+		"Authorization":           {"OAuth null"},
+		"X-Fb-Friendly-Name":      {"authenticate"},
+		"X-Fb-Server-Cluster":     {"True"},
+	}
+}
+
+func buildBaseForm(username, password, credentialsType, tryNum, deviceID, adid, machineID string) url.Values {
+	jazoest := "22421"
+	if credentialsType == "two_factor" {
+		jazoest = "22327"
+	}
+	form := url.Values{
+		"adid":                             {adid},
+		"advertiser_id":                    {adid},
+		"format":                           {"json"},
+		"device_id":                        {deviceID},
+		"family_device_id":                 {deviceID},
+		"secure_family_device_id":          {deviceID},
+		"machine_id":                       {machineID},
+		"email":                            {username},
+		"password":                         {password},
+		"credentials_type":                 {credentialsType},
+		"generate_session_cookies":         {"1"},
+		"generate_analytics_claim":         {"1"},
+		"method":                           {"auth.login"},
+		"try_num":                          {tryNum},
+		"cpl":                              {"true"},
+		"fb4a_shared_phone_cpl_experiment": {"fb4a_shared_phone_nonce_cpl_at_risk_v3"},
+		"fb4a_shared_phone_cpl_group":      {"enable_v3_at_risk"},
+		"enroll_misauth":                   {"false"},
+		"error_detail_type":                {"button_with_disabled"},
+		"source":                           {"login"},
+		"currently_logged_in_userid":       {"0"},
+		"locale":                           {"es_ES"},
+		"client_country_code":              {"ES"},
+		"fb_api_req_friendly_name":         {"authenticate"},
+		"fb_api_caller_class":              {"Fb4aAuthHandler"},
+		"api_key":                          {DefaultFB4AAPIKey},
+		"access_token":                     {DefaultFB4AAppAccessToken},
+		"jazoest":                          {jazoest},
+	}
+	if credentialsType == "two_factor" {
+		form.Set("sim_serials", "[]")
+	}
+	return form
 }
 
 // FB4ALogin autentica una cuenta de Facebook emulando la app oficial de Android (FB4A).
@@ -43,27 +122,13 @@ func FB4ALogin(ctx context.Context, client *http.Client, username, password, tot
 
 	deviceID := randomUUID()
 	adid := randomUUID()
-
-	form := url.Values{
-		"adid":                     {adid},
-		"format":                   {"json"},
-		"device_id":                {deviceID},
-		"email":                    {username},
-		"password":                 {password},
-		"credentials_type":         {"password"},
-		"generate_session_cookies": {"1"},
-		"generate_analytics_claim": {"1"},
-		"method":                   {"auth.login"},
-		"try_num":                  {"1"},
-	}
-
-	headers := http.Header{
-		"User-Agent":      {LegacyFB4AUserAgent},
-		"Content-Type":    {"application/x-www-form-urlencoded"},
-		"Accept-Language": {"en-US,en;q=0.9"},
-	}
+	machineID := randomAlphaNum(24)
 
 	reqURL := fmt.Sprintf("%s?access_token=%s", FBAuthURL, DefaultFB4AAppAccessToken)
+	headers := fb4aHeaders()
+
+	form := buildBaseForm(username, password, "password", "1", deviceID, adid, machineID)
+
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("error al crear petición de autenticación: %w", err)
@@ -76,7 +141,7 @@ func FB4ALogin(ctx context.Context, client *http.Client, username, password, tot
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readResponseBody(resp)
 	if err != nil {
 		return nil, fmt.Errorf("error al leer respuesta de login: %w", err)
 	}
@@ -118,34 +183,101 @@ func FB4ALogin(ctx context.Context, client *http.Client, username, password, tot
 			}
 		}
 
-		// Extraer metadata 2FA
-		metaStr, _ := errMap["two_factor_first_step_metadata"].(string)
-		var metaObj map[string]any
-		if metaStr != "" {
-			_ = json.Unmarshal([]byte(metaStr), &metaObj)
+		var userID string
+		var firstFactor string
+		var flowRenderType string
+
+		var challengeURL string
+		if errDataRaw, ok := errMap["error_data"]; ok {
+			var errDataMap map[string]any
+			switch v := errDataRaw.(type) {
+			case string:
+				_ = json.Unmarshal([]byte(v), &errDataMap)
+			case map[string]any:
+				errDataMap = v
+			}
+			if errDataMap != nil {
+				if u, ok := errDataMap["url"].(string); ok {
+					challengeURL = u
+				}
+				if uid, ok := errDataMap["uid"].(string); ok {
+					userID = uid
+				} else if uidNum, ok := errDataMap["uid"].(float64); ok {
+					userID = fmt.Sprintf("%.0f", uidNum)
+				}
+				if uid, ok := errDataMap["userid"].(string); ok && userID == "" {
+					userID = uid
+				} else if uidNum, ok := errDataMap["userid"].(float64); ok && userID == "" {
+					userID = fmt.Sprintf("%.0f", uidNum)
+				}
+				if uid, ok := errDataMap["user_id"].(string); ok && userID == "" {
+					userID = uid
+				} else if uidNum, ok := errDataMap["user_id"].(float64); ok && userID == "" {
+					userID = fmt.Sprintf("%.0f", uidNum)
+				}
+
+				if ff, ok := errDataMap["login_first_factor"].(string); ok {
+					firstFactor = ff
+				} else if ff, ok := errDataMap["first_factor"].(string); ok {
+					firstFactor = ff
+				} else if ff, ok := errDataMap["first_factor_id"].(string); ok {
+					firstFactor = ff
+				}
+			}
 		}
-		firstFactor, _ := metaObj["first_factor"].(string)
-		flowRenderType, _ := metaObj["flow_render_type"].(string)
 
 		totpCode, err := GenerateTOTP(totpKey, time.Now())
 		if err != nil {
 			return nil, fmt.Errorf("error al generar código 2FA: %w", err)
 		}
 
-		secondForm := url.Values{
-			"adid":                     {adid},
-			"format":                   {"json"},
-			"device_id":                {deviceID},
-			"email":                    {username},
-			"password":                 {password},
-			"credentials_type":         {"two_factor"},
-			"two_factor_code":          {totpCode},
-			"first_factor":             {firstFactor},
-			"flow_render_type":         {flowRenderType},
-			"generate_session_cookies": {"1"},
-			"generate_analytics_claim": {"1"},
-			"method":                   {"auth.login"},
-			"try_num":                  {"2"},
+		// Si Facebook exige resolución vía webview / Bloks checkpoint (sin metadata nativa directa)
+		if challengeURL != "" && (firstFactor == "" || userID == "") {
+			return nil, &types.TwoFactorChallengeError{
+				Code:         int(errorCode),
+				Subcode:      int(subcode),
+				Title:        userTitle,
+				Description:  userMsg,
+				ChallengeURL: challengeURL,
+				TOTPCode:     totpCode,
+				FBTraceID:    fbtraceID,
+			}
+		}
+
+		// 2. Extraer de two_factor_first_step_metadata si está disponible
+		if metaRaw, ok := errMap["two_factor_first_step_metadata"]; ok {
+			var metaObj map[string]any
+			switch v := metaRaw.(type) {
+			case string:
+				_ = json.Unmarshal([]byte(v), &metaObj)
+			case map[string]any:
+				metaObj = v
+			}
+			if metaObj != nil {
+				if firstFactor == "" {
+					if ff, ok := metaObj["first_factor"].(string); ok {
+						firstFactor = ff
+					}
+				}
+				if flowRenderType == "" {
+					if frt, ok := metaObj["flow_render_type"].(string); ok {
+						flowRenderType = frt
+					}
+				}
+			}
+		}
+
+		secondForm := buildBaseForm(username, totpCode, "two_factor", "2", deviceID, adid, machineID)
+		secondForm.Set("twofactor_code", totpCode)
+		secondForm.Set("two_factor_code", totpCode)
+		if userID != "" {
+			secondForm.Set("userid", userID)
+		}
+		if firstFactor != "" {
+			secondForm.Set("first_factor", firstFactor)
+		}
+		if flowRenderType != "" {
+			secondForm.Set("flow_render_type", flowRenderType)
 		}
 
 		req2, err := http.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(secondForm.Encode()))
@@ -160,7 +292,7 @@ func FB4ALogin(ctx context.Context, client *http.Client, username, password, tot
 		}
 		defer resp2.Body.Close()
 
-		body2Bytes, _ := io.ReadAll(resp2.Body)
+		body2Bytes, _ := readResponseBody(resp2)
 		var res2Map map[string]any
 		_ = json.Unmarshal(body2Bytes, &res2Map)
 
@@ -173,6 +305,17 @@ func FB4ALogin(ctx context.Context, client *http.Client, username, password, tot
 		if err2Map != nil {
 			if m, ok := err2Map["error_user_msg"].(string); ok && m != "" {
 				msg = m
+			}
+		}
+		if challengeURL != "" {
+			return nil, &types.TwoFactorChallengeError{
+				Code:         int(errorCode),
+				Subcode:      int(subcode),
+				Title:        "2FA Challenge Required",
+				Description:  msg,
+				ChallengeURL: challengeURL,
+				TOTPCode:     totpCode,
+				FBTraceID:    fbtraceID,
 			}
 		}
 		return nil, &types.FacebookAPIError{

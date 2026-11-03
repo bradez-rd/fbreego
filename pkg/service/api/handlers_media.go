@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -125,3 +126,47 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 
 	JSONSuccess(w, "Media deleted successfully.", map[string]string{"mediaId": mediaID}, http.StatusOK)
 }
+
+func (s *Server) handleDownloadMediaProxy(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	targetURL := r.URL.Query().Get("url")
+	if targetURL == "" {
+		JSONError(w, "INVALID_REQUEST", "Query parameter 'url' is required.", http.StatusBadRequest, nil, "")
+		return
+	}
+
+	rec, err := s.Registry.Get(sessionID)
+	if err != nil {
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), "GET", targetURL, nil)
+	if err != nil {
+		JSONError(w, "INVALID_URL", "Target URL is invalid.", http.StatusBadRequest, nil, "")
+		return
+	}
+
+	if rec.ProviderData != nil && rec.ProviderData.CookieFacebook != "" {
+		req.Header.Set("Cookie", rec.ProviderData.CookieFacebook)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137")
+	req.Header.Set("Referer", "https://www.facebook.com/")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		JSONError(w, "DOWNLOAD_FAILED", err.Error(), http.StatusBadGateway, nil, "")
+		return
+	}
+	defer resp.Body.Close()
+
+	if cType := resp.Header.Get("Content-Type"); cType != "" {
+		w.Header().Set("Content-Type", cType)
+	}
+	if cLen := resp.Header.Get("Content-Length"); cLen != "" {
+		w.Header().Set("Content-Length", cLen)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+

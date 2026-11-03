@@ -61,25 +61,54 @@ func GetUserInfo(ctx context.Context, client *http.Client, fb *types.DataFB, use
 		client = http.DefaultClient
 	}
 
-	variables := map[string]any{
-		"user_id": userID,
-	}
-	varBytes, err := json.Marshal(variables)
+	form := utils.BuildFormAll(fb, "", "", false)
+	form.Set("ids[0]", userID)
+
+	res, err := executePost(ctx, client, fb, "https://www.facebook.com/chat/user_info/", form)
 	if err != nil {
 		return nil, err
 	}
 
-	form := utils.BuildFormAll(fb, "ProfileCometHeaderQuery", "3419284019284718", true)
-	form.Set("variables", string(varBytes))
-
-	res, err := executePost(ctx, client, fb, GraphQLURL, form)
-	if err != nil {
-		return nil, err
-	}
-
-	dataMap, _ := res["data"].(map[string]any)
-	if dataMap == nil {
+	payload, _ := res["payload"].(map[string]any)
+	if payload == nil {
 		return nil, fmt.Errorf("información de usuario no encontrada: %s", userID)
 	}
-	return dataMap, nil
+
+	profiles, _ := payload["profiles"].(map[string]any)
+	if profiles == nil {
+		return nil, fmt.Errorf("información de usuario no encontrada: %s", userID)
+	}
+
+	profile, _ := profiles[userID].(map[string]any)
+	if profile == nil {
+		return nil, fmt.Errorf("información de usuario no encontrada: %s", userID)
+	}
+
+	genderLabel := "Unknown"
+	if g, ok := profile["gender"].(float64); ok {
+		if int(g) == 1 {
+			genderLabel = "Female"
+		} else if int(g) == 2 {
+			genderLabel = "Male"
+		}
+	}
+
+	thumbSrc := ""
+	if ts, ok := profile["thumbSrc"].(string); ok && ts != "" {
+		thumbSrc = ts
+	} else if ts, ok := profile["thumb_src"].(string); ok && ts != "" {
+		thumbSrc = ts
+	}
+
+	return map[string]any{
+		"idUser":                  profile["id"],
+		"nameUser":                profile["name"],
+		"firstName":               profile["firstName"],
+		"Username":                profile["vanity"],
+		"thumbSrc":                thumbSrc,
+		"urlProfile":              profile["uri"],
+		"genderUser":              genderLabel,
+		"alternateName":           profile["alternateName"],
+		"chatWithUSerIsNonFriend": profile["is_nonfriend_messenger_contact"],
+	}, nil
 }

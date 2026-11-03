@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 	"github.com/bradez-rd/fbreego/pkg/core/console"
 	"github.com/bradez-rd/fbreego/pkg/core/logger"
 	"github.com/bradez-rd/fbreego/pkg/service/api"
@@ -24,14 +25,12 @@ import (
 func Run() {
 	fs := flag.NewFlagSet("fbreego", flag.ContinueOnError)
 
-	defaultPort := os.Getenv("PORT")
+	defaultPort := coreconfig.Value("FBREEGO_PORT")
 	if defaultPort == "" {
 		defaultPort = "8000"
 	}
-	defaultSessions := os.Getenv("FBCHAT_SESSIONS_DIR")
-	if defaultSessions == "" {
-		defaultSessions = ".fbchat_sessions"
-	}
+	defaultSessions := coreconfig.DataDir("FBREEGO_SESSIONS_DIR", ".fbreego_sessions")
+	defaultMedia := coreconfig.DataDir("FBREEGO_MEDIA_DIR", ".fbreego_media")
 
 	portFlag := fs.String("p", defaultPort, "Puerto TCP para escuchar peticiones HTTP")
 	fs.StringVar(portFlag, "port", defaultPort, "Puerto TCP para escuchar peticiones HTTP")
@@ -39,8 +38,8 @@ func Run() {
 	sessionsFlag := fs.String("s", defaultSessions, "Directorio de almacenamiento de sesiones cifradas")
 	fs.StringVar(sessionsFlag, "sessions", defaultSessions, "Directorio de almacenamiento de sesiones cifradas")
 
-	mediaFlag := fs.String("m", ".fbchat_media", "Directorio de almacenamiento de archivos multimedia")
-	fs.StringVar(mediaFlag, "media", ".fbchat_media", "Directorio de almacenamiento de archivos multimedia")
+	mediaFlag := fs.String("m", defaultMedia, "Directorio de almacenamiento de archivos multimedia")
+	fs.StringVar(mediaFlag, "media", defaultMedia, "Directorio de almacenamiento de archivos multimedia")
 
 	versionFlag := fs.Bool("v", false, "Muestra la versión de fbreego")
 	fs.BoolVar(versionFlag, "version", false, "Muestra la versión de fbreego")
@@ -52,7 +51,7 @@ func Run() {
 		fmt.Fprintf(os.Stdout, "Opciones disponibles:\n")
 		fmt.Fprintf(os.Stdout, "  -p, --port string      Puerto HTTP (defecto: %s o $PORT)\n", defaultPort)
 		fmt.Fprintf(os.Stdout, "  -s, --sessions string  Directorio de sesiones (defecto: %s)\n", defaultSessions)
-		fmt.Fprintf(os.Stdout, "  -m, --media string     Directorio multimedia (defecto: .fbchat_media)\n")
+		fmt.Fprintf(os.Stdout, "  -m, --media string     Directorio multimedia (defecto: %s)\n", defaultMedia)
 		fmt.Fprintf(os.Stdout, "  -v, --version          Muestra la versión del servicio\n")
 		fmt.Fprintf(os.Stdout, "  -h, --help             Muestra este mensaje de ayuda\n\n")
 	}

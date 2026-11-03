@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,10 +124,13 @@ func (r *SessionRegistry) Create(ctx context.Context, input types.SessionCreateI
 		label = "Facebook account"
 	}
 
-	var cookieHeader string
+	var parts []string
 	for _, c := range input.Cookies {
-		cookieHeader += c.Name + "=" + c.Value + "; "
+		if c.Name != "" && c.Value != "" {
+			parts = append(parts, fmt.Sprintf("%s=%s", c.Name, c.Value))
+		}
 	}
+	cookieHeader := strings.Join(parts, "; ")
 
 	// Validar contra Facebook
 	providerData, err := session.ExtractSession(ctx, r.httpClient, cookieHeader, nil)

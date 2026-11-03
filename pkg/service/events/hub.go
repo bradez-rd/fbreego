@@ -124,7 +124,17 @@ func (h *RealtimeHub) Publish(event map[string]any) {
 	dispatcher := h.dispatcher
 	h.mu.RUnlock()
 	if dispatcher != nil {
-		dispatcher.Enqueue(eventName, event)
+		payload := event
+		if data, ok := event["data"].(map[string]any); ok {
+			payload = make(map[string]any, len(data)+1)
+			for key, value := range data {
+				payload[key] = value
+			}
+			if _, exists := payload["sessionId"]; !exists {
+				payload["sessionId"] = event["sessionId"]
+			}
+		}
+		dispatcher.Enqueue(eventName, payload)
 	}
 }
 

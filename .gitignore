@@ -37,5 +37,6 @@ bin/
 dist/
 
 # Runtime data
-.fbchat_sessions/
-.fbchat_media/
+.fbreego_sessions/
+.fbreego_media/
+.fbreego_cookies/

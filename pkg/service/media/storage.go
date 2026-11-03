@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 	"github.com/bradez-rd/fbreego/pkg/core/permissions"
 )
 
@@ -56,7 +57,7 @@ type MediaStorage struct {
 // NewMediaStorage crea un nuevo gestor de almacenamiento de medios en el directorio especificado.
 func NewMediaStorage(mediaDir string) *MediaStorage {
 	if mediaDir == "" {
-		mediaDir = ".fbchat_media"
+		mediaDir = coreconfig.DataDir("FBREEGO_MEDIA_DIR", ".fbreego_media")
 	}
 	_ = os.MkdirAll(mediaDir, 0700)
 	_ = permissions.SetPrivateFilePermissions(mediaDir)

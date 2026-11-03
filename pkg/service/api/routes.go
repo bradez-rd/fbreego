@@ -4,12 +4,12 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 
+	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 	"github.com/bradez-rd/fbreego/pkg/service/traffic"
 	"github.com/bradez-rd/fbreego/web"
 )
@@ -234,9 +234,16 @@ func (s *Server) Routes() http.Handler {
 		// Sesiones
 		pr.Get("/api/v1/sessions", s.handleListSessions)
 		pr.Post("/api/v1/sessions", s.handleCreateSession)
+		pr.Post("/api/v1/sessions/login", s.handleLoginSession)
+		pr.Post("/api/v1/sessions/auth/credentials", s.handleCredentialsLogin)
+		pr.Post("/api/v1/sessions/auth/2fa", s.handleCompleteTwoFactor)
 		pr.Get("/api/v1/sessions/{sessionId}/status", s.handleGetSessionStatus)
 		pr.Post("/api/v1/sessions/{sessionId}/validate", s.handleValidateSession)
 		pr.Delete("/api/v1/sessions/{sessionId}", s.handleDeleteSession)
+
+		// Autenticación directa y utilidades 2FA TOTP
+		pr.Post("/api/v1/auth/login", s.handleAuthLogin)
+		pr.Post("/api/v1/auth/totp/generate", s.handleGenerateTOTP)
 
 		// Listeners de sesión
 		pr.Post("/api/v1/sessions/{sessionId}/listen/start", s.handleStartListening)
@@ -245,11 +252,16 @@ func (s *Server) Routes() http.Handler {
 
 		// Conversaciones / Threads
 		pr.Get("/api/v1/sessions/{sessionId}/threads", s.handleListThreads)
+		pr.Get("/api/v1/sessions/{sessionId}/threads/{threadId}/messages", s.handleGetThreadMessages)
+		pr.Post("/api/v1/sessions/{sessionId}/threads/{threadId}/read", s.handleMarkThreadRead)
+		pr.Post("/api/v1/sessions/{sessionId}/threads/{threadId}/delivered", s.handleMarkThreadDelivered)
+		pr.Post("/api/v1/sessions/{sessionId}/threads/{threadId}/typing", s.handleSendTyping)
 
 		// Mensajería
 		pr.Post("/api/v1/sessions/{sessionId}/messages/text", s.handleSendTextMessage)
 		pr.Post("/api/v1/sessions/{sessionId}/messages/reaction", s.handleReactMessage)
 		pr.Post("/api/v1/sessions/{sessionId}/messages/unsend", s.handleUnsendMessage)
+		pr.Patch("/api/v1/sessions/{sessionId}/messages/{messageId}", s.handleEditMessage)
 		pr.Post("/api/v1/sessions/{sessionId}/messages/media", s.handleSendMediaMessage)
 
 		// Social & Privacidad
@@ -270,6 +282,7 @@ func (s *Server) Routes() http.Handler {
 		pr.Get("/api/v1/media/{mediaId}", s.handleGetMediaFile)
 		pr.Get("/api/v1/media/{mediaId}/info", s.handleGetMediaInfo)
 		pr.Delete("/api/v1/media/{mediaId}", s.handleDeleteMedia)
+		pr.Get("/api/v1/sessions/{sessionId}/media/download", s.handleDownloadMediaProxy)
 
 		// Inspector de Tráfico HTTP (Facebook y API)
 		pr.Get("/api/v1/traffic", s.handleListTraffic)
@@ -278,7 +291,7 @@ func (s *Server) Routes() http.Handler {
 		pr.Delete("/api/v1/traffic", s.handleClearTraffic)
 
 		// Suite de Tests E2E entre Sesiones y APIs
-		if envFlag("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", false) {
+		if envFlag("FBREEGO_ENABLE_E2E_TEST_ENDPOINT", false) {
 			pr.Post("/api/v1/tests/e2e", s.handleRunE2ETests)
 		}
 	})
@@ -314,7 +327,7 @@ func (s *Server) handleWebSocketStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var originPatterns []string
-	for _, origin := range strings.Split(strings.TrimSpace(os.Getenv("FBCHAT_API_WS_ORIGINS")), ",") {
+	for _, origin := range strings.Split(coreconfig.Value("FBREEGO_API_WS_ORIGINS"), ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
 			originPatterns = append(originPatterns, origin)
 		}

@@ -70,3 +70,14 @@ func GenerateTOTP(secretKey string, t time.Time) (string, error) {
 	otp := binaryCode % 1000000
 	return fmt.Sprintf("%06d", otp), nil
 }
+
+// CurrentTOTP genera el código de 6 dígitos actual y los segundos restantes de la ventana de 30 segundos.
+func CurrentTOTP(secretKey string) (string, int, error) {
+	now := time.Now()
+	remainingSeconds := int(30 - (now.Unix() % 30))
+	code, err := GenerateTOTP(secretKey, now)
+	if err != nil {
+		return "", 0, err
+	}
+	return code, remainingSeconds, nil
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -18,8 +19,8 @@ import (
 )
 
 func setupTestServer(t *testing.T) (*Server, http.Handler) {
-	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
-	tempDir, err := os.MkdirTemp("", "fbchat_api_test_*")
+	t.Setenv("FBREEGO_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
+	tempDir, err := os.MkdirTemp("", "fbreego_api_test_*")
 	if err != nil {
 		t.Fatalf("error temp dir: %v", err)
 	}
@@ -72,13 +73,13 @@ func TestHealthzAndReadyz(t *testing.T) {
 
 func TestBasicAuthMiddleware_Unauthorized(t *testing.T) {
 	// Exigir autenticación explícitamente
-	_ = os.Setenv("FBCHAT_API_AUTH_REQUIRED", "1")
-	_ = os.Setenv("FBCHAT_API_USERNAME", "admin")
-	_ = os.Setenv("FBCHAT_API_PASSWORD", "secret123")
+	_ = os.Setenv("FBREEGO_API_AUTH_REQUIRED", "1")
+	_ = os.Setenv("FBREEGO_API_USERNAME", "admin")
+	_ = os.Setenv("FBREEGO_API_PASSWORD", "secret123")
 	defer func() {
-		_ = os.Unsetenv("FBCHAT_API_AUTH_REQUIRED")
-		_ = os.Unsetenv("FBCHAT_API_USERNAME")
-		_ = os.Unsetenv("FBCHAT_API_PASSWORD")
+		_ = os.Unsetenv("FBREEGO_API_AUTH_REQUIRED")
+		_ = os.Unsetenv("FBREEGO_API_USERNAME")
+		_ = os.Unsetenv("FBREEGO_API_PASSWORD")
 	}()
 
 	_, handler := setupTestServer(t)
@@ -104,9 +105,9 @@ func TestBasicAuthMiddleware_Unauthorized(t *testing.T) {
 }
 
 func TestAuthenticationFailsClosedWhenCredentialsMissing(t *testing.T) {
-	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "1")
-	t.Setenv("FBCHAT_API_USERNAME", "")
-	t.Setenv("FBCHAT_API_PASSWORD", "")
+	t.Setenv("FBREEGO_API_AUTH_REQUIRED", "1")
+	t.Setenv("FBREEGO_API_USERNAME", "")
+	t.Setenv("FBREEGO_API_PASSWORD", "")
 	_, handler := setupTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil)
@@ -118,7 +119,7 @@ func TestAuthenticationFailsClosedWhenCredentialsMissing(t *testing.T) {
 }
 
 func TestCORSRejectsUnconfiguredOrigin(t *testing.T) {
-	t.Setenv("FBCHAT_API_CORS_ORIGINS", "https://admin.example.com")
+	t.Setenv("FBREEGO_API_CORS_ORIGINS", "https://admin.example.com")
 	_, handler := setupTestServer(t)
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/sessions", nil)
 	req.Header.Set("Origin", "https://evil.example")
@@ -130,8 +131,8 @@ func TestCORSRejectsUnconfiguredOrigin(t *testing.T) {
 }
 
 func TestE2ETestEndpointDisabledByDefault(t *testing.T) {
-	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
-	t.Setenv("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", "0")
+	t.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
+	t.Setenv("FBREEGO_ENABLE_E2E_TEST_ENDPOINT", "0")
 	_, handler := setupTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tests/e2e", nil)
 	w := httptest.NewRecorder()
@@ -142,7 +143,7 @@ func TestE2ETestEndpointDisabledByDefault(t *testing.T) {
 }
 
 func TestTrafficCaptureDisabledByDefault(t *testing.T) {
-	t.Setenv("FBCHAT_TRAFFIC_ENABLED", "0")
+	t.Setenv("FBREEGO_TRAFFIC_ENABLED", "0")
 	srv, _ := setupTestServer(t)
 	if srv.TrafficEnabled {
 		t.Fatal("traffic capture must be opt-in")
@@ -169,16 +170,16 @@ func TestWebSocketTicketIsSingleUseAndSessionBound(t *testing.T) {
 }
 
 func TestValidateRuntimeConfiguration(t *testing.T) {
-	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "1")
-	t.Setenv("FBCHAT_API_USERNAME", "")
-	t.Setenv("FBCHAT_API_PASSWORD", "")
+	t.Setenv("FBREEGO_API_AUTH_REQUIRED", "1")
+	t.Setenv("FBREEGO_API_USERNAME", "")
+	t.Setenv("FBREEGO_API_PASSWORD", "")
 	if ValidateRuntimeConfiguration() == nil {
 		t.Fatal("expected missing auth credentials to fail runtime validation")
 	}
 }
 
 func TestOpenAPICoversRegisteredRoutes(t *testing.T) {
-	t.Setenv("FBCHAT_ENABLE_E2E_TEST_ENDPOINT", "0")
+	t.Setenv("FBREEGO_ENABLE_E2E_TEST_ENDPOINT", "0")
 	_, handler := setupTestServer(t)
 	routes, ok := handler.(chi.Routes)
 	if !ok {
@@ -203,8 +204,8 @@ func TestOpenAPICoversRegisteredRoutes(t *testing.T) {
 }
 
 func TestServePortalSPA(t *testing.T) {
-	_ = os.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
-	defer os.Unsetenv("FBCHAT_API_AUTH_REQUIRED")
+	_ = os.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
+	defer os.Unsetenv("FBREEGO_API_AUTH_REQUIRED")
 
 	_, handler := setupTestServer(t)
 
@@ -216,7 +217,7 @@ func TestServePortalSPA(t *testing.T) {
 		t.Fatalf("GET / retornó status %d, esperado 200", w.Code)
 	}
 	body := w.Body.String()
-	if len(body) < 1000 || !jsonContains(body, "fbchat-v2 Provider Portal") {
+	if len(body) < 1000 || !jsonContains(body, "fbreego Provider Portal") {
 		t.Errorf("contenido de portal.html inesperado o incompleto")
 	}
 }
@@ -226,8 +227,8 @@ func jsonContains(s, substr string) bool {
 }
 
 func TestUIPortalAPISchemaCompatibility(t *testing.T) {
-	_ = os.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
-	defer os.Unsetenv("FBCHAT_API_AUTH_REQUIRED")
+	_ = os.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
+	defer os.Unsetenv("FBREEGO_API_AUTH_REQUIRED")
 
 	srv, handler := setupTestServer(t)
 
@@ -306,5 +307,113 @@ func TestUIPortalAPISchemaCompatibility(t *testing.T) {
 	whPub := srv.WebhookStore.GetPublic()
 	if _, ok := whPub["secretConfigured"]; !ok {
 		t.Errorf("webhook.GetPublic() missing secretConfigured: %v", whPub)
+	}
+}
+
+func TestGenerateTOTPEndpoint(t *testing.T) {
+	_, handler := setupTestServer(t)
+
+	// Test con clave válida
+	body := strings.NewReader(`{"key": "RSZT S55E PKQR FOUX"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/totp/generate", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("/api/v1/auth/totp/generate retornó status %d, esperado 200", w.Code)
+	}
+
+	var res struct {
+		Code    string `json:"code"`
+		Results struct {
+			Code             string `json:"code"`
+			RemainingSeconds int    `json:"remainingSeconds"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("error json: %v", err)
+	}
+	if res.Code != "SUCCESS" || len(res.Results.Code) != 6 {
+		t.Errorf("código TOTP inesperado: %+v", res)
+	}
+	if res.Results.RemainingSeconds <= 0 || res.Results.RemainingSeconds > 30 {
+		t.Errorf("segundos restantes inválidos: %d", res.Results.RemainingSeconds)
+	}
+
+	// Test con clave vacía
+	bodyEmpty := strings.NewReader(`{"key": ""}`)
+	reqEmpty := httptest.NewRequest("POST", "/api/v1/auth/totp/generate", bodyEmpty)
+	wEmpty := httptest.NewRecorder()
+	handler.ServeHTTP(wEmpty, reqEmpty)
+	if wEmpty.Code != http.StatusUnprocessableEntity {
+		t.Errorf("clave vacía debió dar 422, dio %d", wEmpty.Code)
+	}
+}
+
+func TestLoginValidation(t *testing.T) {
+	_, handler := setupTestServer(t)
+
+	// Validar que cuerpo vacío rechace con 422
+	req := httptest.NewRequest("POST", "/api/v1/sessions/login", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("cuerpo vacío debió retornar 422, retornó %d", w.Code)
+	}
+}
+
+func TestCredentialsLoginValidation(t *testing.T) {
+	_, handler := setupTestServer(t)
+
+	// Validar que cuerpo vacío en /sessions/auth/credentials dé 422
+	req := httptest.NewRequest("POST", "/api/v1/sessions/auth/credentials", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("cuerpo vacío debió retornar 422, retornó %d", w.Code)
+	}
+}
+
+func TestCompleteTwoFactorValidation(t *testing.T) {
+	srv, handler := setupTestServer(t)
+
+	// 1. Cuerpo vacío
+	req := httptest.NewRequest("POST", "/api/v1/sessions/auth/2fa", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("cuerpo vacío debió retornar 422, retornó %d", w.Code)
+	}
+
+	// 2. Desafío inexistente
+	req2 := httptest.NewRequest("POST", "/api/v1/sessions/auth/2fa", strings.NewReader(`{"challengeId":"chal_inexistente","code":"123456"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusGone {
+		t.Fatalf("desafío inexistente debió retornar 410, retornó %d", w2.Code)
+	}
+
+	// 3. Registrar desafío y validar que se consume
+	srv.challengesMu.Lock()
+	srv.challenges["chal_test_123"] = Pending2FAChallenge{
+		ChallengeID: "chal_test_123",
+		Username:    "test@example.com",
+		Password:    "testpass",
+		ExpiresAt:   time.Now().Add(5 * time.Minute),
+	}
+	srv.challengesMu.Unlock()
+
+	srv.challengesMu.Lock()
+	_, exists := srv.challenges["chal_test_123"]
+	srv.challengesMu.Unlock()
+	if !exists {
+		t.Fatal("desafío debió existir")
 	}
 }

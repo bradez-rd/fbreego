@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	ServiceName            = "fbchat-provider"
+	ServiceName            = "fbreego"
 	Version                = "2.3.3"
 	WebSocketTicketTTLSecs = 30
 )
@@ -35,6 +35,17 @@ type websocketTicket struct {
 	SessionID string
 }
 
+// Pending2FAChallenge almacena temporalmente los datos para completar un inicio de sesión con 2FA.
+type Pending2FAChallenge struct {
+	ChallengeID  string    `json:"challengeId"`
+	Username     string    `json:"username"`
+	Password     string    `json:"password"`
+	Label        string    `json:"label"`
+	TenantID     string    `json:"tenantId"`
+	ExpiresAt    time.Time `json:"expiresAt"`
+	ChallengeURL string    `json:"challengeUrl,omitempty"`
+}
+
 // Server estructura los componentes principales del microservicio HTTP REST y WebSocket.
 type Server struct {
 	Registry        *sessions.SessionRegistry
@@ -50,6 +61,9 @@ type Server struct {
 
 	ticketsMu sync.Mutex
 	tickets   map[string]websocketTicket
+
+	challengesMu sync.Mutex
+	challenges   map[string]Pending2FAChallenge
 
 	auditMu   sync.Mutex
 	auditLogs []AuditLogEntry
@@ -105,7 +119,7 @@ func NewServer(
 		}
 	}
 
-	trafficEnabled := envFlag("FBCHAT_TRAFFIC_ENABLED", false)
+	trafficEnabled := envFlag("FBREEGO_TRAFFIC_ENABLED", false)
 	transport := baseTransport
 	if trafficEnabled {
 		transport = traffic.NewTrafficTransport(baseTransport, trafficStore)
@@ -118,6 +132,11 @@ func NewServer(
 		reg.SetHTTPClient(httpClient)
 	}
 
+	e2eeMgr := e2ee.NewProtocolManager()
+	if km, err := e2ee.DefaultKeyManager(); err == nil {
+		e2eeMgr.SetBackend(e2ee.NewMessengerE2EEBackendWithKeyManager(km, httpClient))
+	}
+
 	return &Server{
 		Registry:        reg,
 		WebhookStore:    wsStore,
@@ -127,9 +146,10 @@ func NewServer(
 		ListenerManager: lManager,
 		TrafficStore:    trafficStore,
 		TrafficEnabled:  trafficEnabled,
-		E2EEManager:     e2ee.NewProtocolManager(),
+		E2EEManager:     e2eeMgr,
 		httpClient:      httpClient,
 		tickets:         make(map[string]websocketTicket),
+		challenges:      make(map[string]Pending2FAChallenge),
 	}
 }
 

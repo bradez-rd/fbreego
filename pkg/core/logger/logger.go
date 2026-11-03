@@ -37,7 +37,8 @@ func Error(format string, v ...any) {
 
 // Debug escribe un mensaje de depuración si está habilitado.
 func Debug(format string, v ...any) {
-	if os.Getenv("FBCHAT_DEBUG") == "1" || os.Getenv("FBCHAT_DEBUG") == "true" {
+	debug := os.Getenv("FBREEGO_DEBUG")
+	if debug == "1" || debug == "true" {
 		DefaultLogger.Printf("[DEBUG] %s", RedactSensitive(fmt.Sprintf(format, v...)))
 	}
 }

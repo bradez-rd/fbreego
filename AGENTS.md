@@ -31,8 +31,11 @@ Estas fuentes son **referencias para estudiar**, no dependencias obligatorias ni
 | Fuente | Uso principal |
 | --- | --- |
 | https://github.com/mautrix/meta | Bridge de Messenger; sincronización, sesiones, cambios de protocolo y E2EE. Revisar especialmente issues, PR y releases. |
+| https://github.com/gklka/Hermes | Cliente/bridge Messenger moderno con LightSpeed, DGW y E2EE. |
 | https://github.com/MinhHuyDev/fbchat-v2 | Implementación Python; eventos, modelos de mensajes y aspectos de cifrado. |
 | https://github.com/motovax/motofb | Implementación Go; HTTP/GraphQL, MQTT y recepción de eventos. |
+| https://github.com/HerokeyVN/FB-Messenger-E2EE | Protocolo Signal y Noise en Messenger, `device-store`, prekeys y sockets E2EE. |
+| https://github.com/jdcodes1/facebook-marketplace-mcp | Extracción de `doc_id` para operaciones GraphQL privadas de Facebook Marketplace. |
 | https://github.com/VangBanLaNhat/fca-unofficial | Implementación JS; semántica FCA, sesiones y comportamiento MQTT. |
 | https://github.com/TorMaireDusi/fca-unofficial | Experimentos de transporte y E2EE; contrastar con evidencia independiente. |
 | https://github.com/dongp06/fca-unofficial | Referencia TypeScript histórica; **archivado**, no fuente primaria de cambios recientes. |

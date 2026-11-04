@@ -16,3 +16,21 @@
 [submodule "docs/research/fbchat"]
 	path = docs/research/fbchat
 	url = https://github.com/fbchat-dev/fbchat.git
+[submodule "docs/research/fca-unofficial-tormairedusi"]
+	path = docs/research/fca-unofficial-tormairedusi
+	url = https://github.com/TorMaireDusi/fca-unofficial.git
+[submodule "docs/research/facebook-chat-api"]
+	path = docs/research/facebook-chat-api
+	url = https://github.com/Schmavery/facebook-chat-api.git
+[submodule "docs/research/purple-facebook"]
+	path = docs/research/purple-facebook
+	url = https://github.com/dequis/purple-facebook.git
+[submodule "docs/research/unzuckify"]
+	path = docs/research/unzuckify
+	url = https://github.com/radian-software/unzuckify.git
+[submodule "docs/research/fca-unofficial-dongp06"]
+	path = docs/research/fca-unofficial-dongp06
+	url = https://github.com/dongp06/fca-unofficial.git
+[submodule "docs/research/hermes"]
+	path = docs/research/hermes
+	url = https://github.com/gklka/Hermes.git

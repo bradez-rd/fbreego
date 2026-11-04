@@ -11,17 +11,23 @@ Este directorio contiene las fuentes de referencia, implementaciones independien
 
 ---
 
-## 1. Catálogo de Repositorios
+## 1. Catálogo Completo de Repositorios
 
 | Directorio | Repositorio Upstream | Lenguaje | Licencia | Áreas Clave de Estudio |
 | :--- | :--- | :--- | :--- | :--- |
-| **`mautrix-meta`** | [`https://github.com/mautrix/meta`](https://github.com/mautrix/meta) | Go | AGPL-3.0 | Transporte DGW/LightSpeed, cursores de sincronización (`syncManager`), cliente HTTP con uTLS (`messagix`), reconexión MQTT y soporte E2EE. |
-| **`motofb`** | [`https://github.com/motovax/motofb`](https://github.com/motovax/motofb) | Go | MIT | Implementación pura en Go de HTTP/GraphQL, sesión web/app, conexión MQTT y recepción de eventos en tiempo real. |
-| **`fbchat_v2`** | [`https://github.com/MinhHuyDev/fbchat-v2`](https://github.com/MinhHuyDev/fbchat-v2) | Python | LGPL-3.0 | Contratos originales de fbchat v2.3.3: listeners, eventos, serialización, subida de adjuntos (Mercury), notas y features sociales. |
-| **`fbchat`** | [`https://github.com/fbchat-dev/fbchat`](https://github.com/fbchat-dev/fbchat) | Python | BSD-3 | Diseño histórico de modelos, estructuras de hilos y arquitectura general de la API de Messenger. |
+| **`mautrix-meta`** | [`https://github.com/mautrix/meta`](https://github.com/mautrix/meta) | Go | AGPL-3.0 | Transporte DGW/LightSpeed, cursores de sincronización (`syncManager`), cliente HTTP con uTLS (`messagix`), reconexión MQTT y soporte E2EE en Go. |
+| **`motofb`** | [`https://github.com/motovax/motofb`](https://github.com/motovax/motofb) | Go | MIT | Implementación pura en Go de HTTP/GraphQL, sesiones web/app, conexión MQTT y recepción de eventos en tiempo real. |
+| **`hermes`** | [`https://github.com/gklka/Hermes`](https://github.com/gklka/Hermes) | Go / Vue | AGPL-3.0 | Cliente y bridge moderno de Messenger con soporte integrado de LightSpeed, MQTT y E2EE. |
+| **`fbchat_v2`** | [`https://github.com/MinhHuyDev/fbchat-v2`](https://github.com/MinhHuyDev/fbchat-v2) | Python | LGPL-3.0 | Contratos de fbchat v2.3.3: listeners, eventos, serialización, subida de adjuntos (Mercury), notas y features sociales. |
+| **`fbchat`** | [`https://github.com/fbchat-dev/fbchat`](https://github.com/fbchat-dev/fbchat) | Python | BSD-3 | Diseño histórico de modelos, estructuras de hilos y arquitectura base de la API de Messenger. |
 | **`fca-unofficial`** | [`https://github.com/VangBanLaNhat/fca-unofficial`](https://github.com/VangBanLaNhat/fca-unofficial) | JavaScript | MIT | Semántica FCA (Facebook Chat API), manejo de sesiones, rotación y refresco de `fb_dtsg`, inventario de acciones y listeners MQTT. |
+| **`fca-unofficial-tormairedusi`** | [`https://github.com/TorMaireDusi/fca-unofficial`](https://github.com/TorMaireDusi/fca-unofficial) | JavaScript | MIT | Experimentos de transporte alternativo, listeners modernos y pruebas E2EE en el ecosistema FCA. |
+| **`fca-unofficial-dongp06`** | [`https://github.com/dongp06/fca-unofficial`](https://github.com/dongp06/fca-unofficial) | TypeScript | MIT | Tipado estricto de eventos, modelos de datos y tipificación en TypeScript de las APIs de Facebook. |
+| **`facebook-chat-api`** | [`https://github.com/Schmavery/facebook-chat-api`](https://github.com/Schmavery/facebook-chat-api) | JavaScript | MIT | Arquitectura FCA histórica original de Node.js; punto de referencia para contratos de funciones clásicas. |
 | **`fb-messenger-e2ee`** | [`https://github.com/HerokeyVN/FB-Messenger-E2EE`](https://github.com/HerokeyVN/FB-Messenger-E2EE) | TypeScript | MIT / AGPL | Protocolo Signal y Noise en Messenger, `device-store`, prekeys, claves de sesión, descifrado de media cifrada y sockets Noise. |
 | **`facebook-marketplace-mcp`** | [`https://github.com/jdcodes1/facebook-marketplace-mcp`](https://github.com/jdcodes1/facebook-marketplace-mcp) | TypeScript | MIT | Extracción de `doc_id` para operaciones GraphQL privadas de Facebook Marketplace, paginación, filtros de búsqueda y rate limiting. |
+| **`purple-facebook`** | [`https://github.com/dequis/purple-facebook`](https://github.com/dequis/purple-facebook) | C | GPL-2.0 | Implementación en C de bajo nivel: protocolo Thrift, sincronización de secuencia (Sync), paquetes MQTT y serialización compacta. |
+| **`unzuckify`** | [`https://github.com/radian-software/unzuckify`](https://github.com/radian-software/unzuckify) | Python | GPL-3.0 | Extracción y descifrado de GraphQL web, flujo de autenticación, extracción de parámetros dinámicos y cookies. |
 
 ---
 
@@ -30,10 +36,11 @@ Este directorio contiene las fuentes de referencia, implementaciones independien
 Cuando se requiera implementar un nuevo endpoint o corregir un problema de protocolo en `fbreego`:
 
 1. **Localizar la operación equivalente:**
-   - Buscar en `docs/research/mautrix-meta` (Go) o `docs/research/motofb` (Go) cómo envían la petición (ej. GraphQL `doc_id`, endpoint REST o paquete MQTT).
+   - Buscar en `docs/research/mautrix-meta` (Go), `docs/research/motofb` (Go) o `docs/research/hermes` (Go) cómo envían la petición (ej. GraphQL `doc_id`, endpoint REST o paquete MQTT).
    - Revisar `docs/research/fbchat_v2` o `docs/research/fca-unofficial` para comparar parámetros (`av`, `fb_dtsg`, headers, cookies requeridas).
 2. **Entender la respuesta y estructuras de datos:**
    - Identificar cómo se parsea la respuesta (JSON estándar, GraphQL batch payload o tareas SQLite LightSpeed).
+   - Contrastar con implementaciones de bajo nivel como `purple-facebook` o `unzuckify` en caso de estructuras binarias o esquemas compactos.
 3. **Escribir la solución nativa en `fbreego`:**
    - Ubicar la lógica en el paquete correspondiente (`pkg/core/lightspeed/`, `pkg/features/thread/`, `pkg/messaging/`, etc.).
    - Utilizar tipos Go fuertemente tipados y parseo defensivo ante campos faltantes.

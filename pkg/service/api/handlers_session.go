@@ -20,7 +20,7 @@ import (
 )
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenantId")
+	tenantID := extractTenantID(r)
 	details := r.URL.Query().Get("details") == "true" || r.URL.Query().Get("details") == "1"
 
 	sessionsList := s.Registry.ListPublic(tenantID, details)
@@ -36,9 +36,17 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	var input types.SessionCreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		JSONError(w, "INVALID_REQUEST", "The request payload is invalid.", http.StatusUnprocessableEntity, nil, "")
+	input, err := DecodeJSONBody[types.SessionCreateInput](w, r, 256*1024)
+	if err != nil {
+		JSONError(w, "INVALID_REQUEST", "The request payload is invalid or exceeds allowed limits.", http.StatusUnprocessableEntity, nil, "")
+		return
+	}
+
+	callerTenant := extractTenantID(r)
+	if input.TenantID == "" {
+		input.TenantID = callerTenant
+	} else if callerTenant != "" && input.TenantID != callerTenant {
+		JSONError(w, "FORBIDDEN", "Tenant mismatch between request context and payload.", http.StatusForbidden, nil, "")
 		return
 	}
 
@@ -379,8 +387,13 @@ func (s *Server) handleGenerateTOTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSessionStatus(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
-	rec, err := s.Registry.Get(sessionID)
+	tenantID := extractTenantID(r)
+	rec, err := s.Registry.GetForTenant(sessionID, tenantID)
 	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
 		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
 		return
 	}
@@ -398,6 +411,16 @@ func (s *Server) handleGetSessionStatus(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleValidateSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
+	tenantID := extractTenantID(r)
+	if _, err := s.Registry.GetForTenant(sessionID, tenantID); err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+
 	rec, err := s.Registry.Validate(r.Context(), sessionID)
 	if err != nil {
 		s.RecordAudit("session_validate_failed", err.Error(), sessionID)
@@ -418,9 +441,14 @@ func (s *Server) handleValidateSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
+	tenantID := extractTenantID(r)
 	s.ListenerManager.StopListening(sessionID)
-	err := s.Registry.Delete(sessionID)
+	err := s.Registry.DeleteForTenant(sessionID, tenantID)
 	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
 		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
 		return
 	}
@@ -432,8 +460,13 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
-	rec, err := s.Registry.Get(sessionID)
+	tenantID := extractTenantID(r)
+	rec, err := s.Registry.GetForTenant(sessionID, tenantID)
 	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
 		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
 		return
 	}
@@ -512,6 +545,16 @@ func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStopListening(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
+	tenantID := extractTenantID(r)
+	if _, err := s.Registry.GetForTenant(sessionID, tenantID); err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+
 	stopped := s.ListenerManager.StopListening(sessionID)
 	if !stopped {
 		JSONError(w, "LISTENER_NOT_FOUND", "No active listener for this session.", http.StatusNotFound, nil, "")
@@ -524,6 +567,16 @@ func (s *Server) handleStopListening(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetListenStatus(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
+	tenantID := extractTenantID(r)
+	if _, err := s.Registry.GetForTenant(sessionID, tenantID); err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+
 	isListening := s.ListenerManager.IsListening(sessionID)
 	status := s.ListenerManager.GetStatus(sessionID)
 	JSONSuccess(w, "Listener status retrieved.", map[string]any{
@@ -535,8 +588,13 @@ func (s *Server) handleGetListenStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
-	rec, err := s.Registry.Get(sessionID)
+	tenantID := extractTenantID(r)
+	rec, err := s.Registry.GetForTenant(sessionID, tenantID)
 	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
 		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
 		return
 	}
@@ -559,7 +617,12 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback con LightSpeed HTML parser
-	lsData, _ := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, rec.BuildCookieHeader())
+	lsData, fallbackErr := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, rec.BuildCookieHeader())
+	if fallbackErr != nil && err != nil {
+		s.RecordAudit("thread_fetch_failed", fmt.Sprintf("primary: %v; fallback: %v", err, fallbackErr), sessionID)
+		JSONError(w, "THREADS_FETCH_FAILED", "Unable to retrieve threads from Facebook.", http.StatusBadGateway, nil, "")
+		return
+	}
 	var fallbackItems []map[string]any
 	for _, t := range lsData {
 		fallbackItems = append(fallbackItems, map[string]any{

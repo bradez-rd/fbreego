@@ -47,8 +47,18 @@ func NewEncryptedSessionStore(stateDir string) *EncryptedSessionStore {
 
 	store := &EncryptedSessionStore{stateDir: stateDir}
 	secret := coreconfig.Value("FBREEGO_SESSION_SECRET")
+	if secret == "" {
+		secret = strings.TrimSpace(os.Getenv("FBCHAT_SESSION_SECRET"))
+	}
 	if len(secret) < 32 {
 		store.initErr = fmt.Errorf("FBREEGO_SESSION_SECRET debe contener al menos 32 caracteres")
+		return store
+	}
+	secretLower := strings.ToLower(secret)
+	if secretLower == "fbchat-default-development-secret-key-change-in-production" ||
+		strings.Contains(secretLower, "change-in-production") ||
+		strings.Contains(secretLower, "change-me") {
+		store.initErr = fmt.Errorf("FBCHAT_SESSION_SECRET no puede usar la clave de desarrollo conocida o insegura")
 		return store
 	}
 	hash := sha256.Sum256([]byte(secret))

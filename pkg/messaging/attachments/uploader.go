@@ -8,11 +8,16 @@ import (
 	"mime/multipart"
 	"net/http"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const UploadURL = "https://upload.facebook.com/ajax/mercury/upload.php"
+// UploadURL devuelve la URL canónica de carga de adjuntos de Mercury.
+func UploadURL() string {
+	return contracts.MercuryUploadURL()
+}
 
 // Upload envía un archivo binario al endpoint de carga de Mercury de Facebook y devuelve el ID del adjunto.
 func Upload(ctx context.Context, client *http.Client, fb *types.DataFB, filename string, r io.Reader, isVoiceClip bool) (*types.AttachmentResult, error) {
@@ -47,7 +52,7 @@ func Upload(ctx context.Context, client *http.Client, fb *types.DataFB, filename
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", UploadURL, &bodyBuf)
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.MercuryUploadURL(), &bodyBuf)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +69,10 @@ func Upload(ctx context.Context, client *http.Client, fb *types.DataFB, filename
 		return nil, fmt.Errorf("fallo al subir adjunto a facebook: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

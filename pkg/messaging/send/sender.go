@@ -12,12 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 	"github.com/bradez-rd/fbreego/pkg/messaging/e2ee"
 )
 
-const SendURL = "https://www.facebook.com/messaging/send/"
+// SendURL define la URL canónica para envío de mensajes desde contratos.
+var SendURL = contracts.SendURL()
 
 // SendText envía un mensaje de texto plano a un usuario o conversación grupal.
 func SendText(ctx context.Context, client *http.Client, fb *types.DataFB, input types.TextMessageInput) (map[string]any, error) {
@@ -110,9 +113,10 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		"is_spoof_warning":                {"false"},
 		"source":                          {"source:chat:web"},
 		"source_tags[0]":                  {"source:chat"},
+		"client_thread_id":                {"root:" + otid},
 		"body":                            {input.Text},
 		"ui_push_phase":                   {"V3"},
-		"client_thread_id":                {"root:" + otid},
+		"status":                          {"0"},
 		"offline_threading_id":            {otid},
 		"message_id":                      {otid},
 		"threading_id":                    {threadingID},
@@ -128,7 +132,7 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		"__rev":                           {fb.ClientRevision},
 	}
 
-	if input.ThreadType == "group" {
+	if types.NormalizeThreadType(input.ThreadType) == types.ThreadTypeGroup {
 		form.Set("thread_fbid", input.ThreadID)
 	} else {
 		form.Set("other_user_fbid", input.ThreadID)
@@ -165,7 +169,7 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", SendURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.SendURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("error al construir petición de envío: %w", err)
 	}
@@ -182,6 +186,10 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		return nil, fmt.Errorf("fallo de red al enviar mensaje: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -207,6 +215,20 @@ func sendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, inp
 		if errVal, ok := payload["error-code"]; ok {
 			errDesc, _ := payload["error-description"].(string)
 			return nil, fmt.Errorf("facebook rechazó el envío (%v): %s", errVal, errDesc)
+		}
+	}
+
+	if errDesc, ok := parsed["errorDescription"].(string); ok && errDesc != "" {
+		errSum, _ := parsed["errorSummary"].(string)
+		return nil, fmt.Errorf("facebook rechazó el envío: %s (%s)", errDesc, errSum)
+	}
+	if jsmods, ok := parsed["jsmods"].(map[string]any); ok {
+		if require, ok := jsmods["require"].([]any); ok {
+			for _, reqItem := range require {
+				if rArr, ok := reqItem.([]any); ok && len(rArr) >= 2 && rArr[0] == "ServerRedirect" {
+					return nil, fmt.Errorf("la cuenta de Facebook requiere verificación de seguridad (checkpoint)")
+				}
+			}
 		}
 	}
 

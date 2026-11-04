@@ -45,6 +45,8 @@ type TrafficRecord struct {
 	ResponseBodyFormat   string            `json:"responseBodyFormatted"`
 	Error                string            `json:"error,omitempty"`
 	CurlCommand          string            `json:"curlCommand"`
+	SessionID            string            `json:"sessionId,omitempty"`
+	TenantID             string            `json:"tenantId,omitempty"`
 }
 
 // TrafficStats contiene métricas acumuladas del tráfico HTTP.

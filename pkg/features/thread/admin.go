@@ -8,11 +8,16 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const AddAdminURL = "https://www.facebook.com/messaging/save_admins/"
+// AddAdminURL devuelve la URL canónica para gestionar administradores.
+func AddAdminURL() string {
+	return contracts.SaveAdminsURL()
+}
 
 // ManageAdmin añade o retira permisos de administrador a un participante de un grupo de Messenger.
 func ManageAdmin(ctx context.Context, client *http.Client, fb *types.DataFB, threadID, adminID string, add bool) (map[string]any, error) {
@@ -37,7 +42,7 @@ func ManageAdmin(ctx context.Context, client *http.Client, fb *types.DataFB, thr
 		"__rev":                   {fb.ClientRevision},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", AddAdminURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.SaveAdminsURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +59,10 @@ func ManageAdmin(ctx context.Context, client *http.Client, fb *types.DataFB, thr
 		return nil, fmt.Errorf("error al modificar administrador de grupo: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

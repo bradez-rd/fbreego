@@ -6,11 +6,15 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const UnfriendURL = "https://www.facebook.com/ajax/profile/removefriendconfirm.php"
+// UnfriendURL devuelve la URL canónica para remover amigos en Facebook.
+func UnfriendURL() string {
+	return contracts.RemoveFriendURL()
+}
 
 // BlockUser bloquea o desbloquea a un usuario en Facebook y Messenger.
 func BlockUser(ctx context.Context, client *http.Client, fb *types.DataFB, targetUserID string, block bool) (map[string]any, error) {
@@ -36,10 +40,14 @@ func BlockUser(ctx context.Context, client *http.Client, fb *types.DataFB, targe
 		return nil, err
 	}
 
-	form := utils.BuildFormAll(fb, "PrivacyBlockUserMutation", "3829104820491023", true)
+	docID := contracts.DocID("PrivacyBlockUserMutation")
+	if docID == "" {
+		docID = contracts.DefaultDocIDPrivacyBlockUser
+	}
+	form := utils.BuildFormAll(fb, "PrivacyBlockUserMutation", docID, true)
 	form.Set("variables", string(varBytes))
 
-	return executePost(ctx, client, fb, GraphQLURL, form)
+	return executePost(ctx, client, fb, contracts.GraphQLURL(), form)
 }
 
 // UnfriendUser remueve a un contacto de la lista de amigos en Facebook.
@@ -58,5 +66,5 @@ func UnfriendUser(ctx context.Context, client *http.Client, fb *types.DataFB, fr
 		"__rev":   {fb.ClientRevision},
 	}
 
-	return executePost(ctx, client, fb, UnfriendURL, form)
+	return executePost(ctx, client, fb, UnfriendURL(), form)
 }

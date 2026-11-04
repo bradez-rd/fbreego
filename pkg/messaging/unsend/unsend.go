@@ -8,11 +8,16 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const UnsendURL = "https://www.facebook.com/messaging/unsend_message/"
+// UnsendURL devuelve la URL canónica de cancelación de mensaje.
+func UnsendURL() string {
+	return contracts.UnsendURL()
+}
 
 // UnsendMessage cancela el envío de un mensaje para todos los participantes de la conversación.
 func UnsendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, messageID string) (map[string]any, error) {
@@ -25,12 +30,13 @@ func UnsendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, m
 		"fb_dtsg":    {fb.FbDtsg},
 		"jazoest":    {fb.Jazoest},
 		"__user":     {fb.FacebookID},
+		"av":         {fb.FacebookID},
 		"__a":        {"1"},
 		"__req":      {utils.NextRequestBase36()},
 		"__rev":      {fb.ClientRevision},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", UnsendURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.UnsendURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +53,10 @@ func UnsendMessage(ctx context.Context, client *http.Client, fb *types.DataFB, m
 		return nil, fmt.Errorf("error al cancelar envío de mensaje: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

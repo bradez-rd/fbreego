@@ -343,6 +343,6 @@ func (s *Server) handleRunE2ETests(w http.ResponseWriter, r *http.Request) {
 		Steps:             steps,
 	}
 
-	s.Registry.RecordActivity(input.SenderSessionID)
+	s.recordSessionActivity(input.SenderSessionID)
 	JSONSuccess(w, "Suite de pruebas E2E ejecutada con éxito.", result, http.StatusOK)
 }

@@ -105,3 +105,30 @@ func TestFileSessionStorage(t *testing.T) {
 		t.Errorf("expected empty after clear, got %q", val)
 	}
 }
+
+func TestFileSessionStorageRejectsCorruptJSONWithoutOverwritingIt(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "corrupt.json")
+	original := []byte(`{"cookies":`)
+	if err := os.WriteFile(filePath, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	storage := NewFileSessionStorage(filePath, "cookies")
+	if _, err := storage.Load(); err == nil {
+		t.Fatal("expected Load to report corrupt JSON")
+	}
+	if err := storage.Save("replacement"); err == nil {
+		t.Fatal("expected Save to refuse overwriting corrupt JSON")
+	}
+	if err := storage.Clear(); err == nil {
+		t.Fatal("expected Clear to report corrupt JSON")
+	}
+
+	after, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Fatalf("corrupt source was unexpectedly overwritten: %q", after)
+	}
+}

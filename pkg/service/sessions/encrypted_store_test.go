@@ -1,10 +1,14 @@
 package sessions
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 )
 
@@ -92,6 +96,22 @@ func TestEncryptedSessionStoreRequiresSecret(t *testing.T) {
 	}
 }
 
+func TestEncryptedSessionStoreRejectsFallbackAndShortKeys(t *testing.T) {
+	// Forbidden default fallback key
+	t.Setenv("FBCHAT_SESSION_SECRET", "change-me-in-production-fbchat-v2-secret-key-32b")
+	storeDefault := NewEncryptedSessionStore(t.TempDir())
+	if err := storeDefault.Ready(); err == nil {
+		t.Fatal("expected default fallback secret to be rejected")
+	}
+
+	// Key shorter than 32 characters
+	t.Setenv("FBCHAT_SESSION_SECRET", "too-short-secret")
+	storeShort := NewEncryptedSessionStore(t.TempDir())
+	if err := storeShort.Ready(); err == nil {
+		t.Fatal("expected secret shorter than 32 characters to be rejected")
+	}
+}
+
 func TestValidateTenantIDRejectsTraversal(t *testing.T) {
 	for _, tenantID := range []string{"..", "../outside", `..\\outside`, "/absolute", "tenant/sub"} {
 		if err := ValidateTenantID(tenantID); err == nil {
@@ -122,5 +142,93 @@ func TestSessionRegistryFailsOnCorruptPersistedSession(t *testing.T) {
 	registry := NewSessionRegistry(store, nil)
 	if registry.Ready() == nil {
 		t.Fatal("expected corrupt persisted session to make registry not ready")
+	}
+}
+
+func TestSessionRegistry_CookieValidation(t *testing.T) {
+	t.Setenv("FBCHAT_SESSION_SECRET", "test-only-session-secret-32-characters-minimum")
+	store := NewEncryptedSessionStore(t.TempDir())
+	registry := NewSessionRegistry(store, nil)
+
+	ctx := context.Background()
+
+	// 1. Less than 2 cookies
+	_, err := registry.Create(ctx, types.SessionCreateInput{
+		Cookies: []types.CookieInput{{Name: "c_user", Value: "123"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "al menos 2 cookies") {
+		t.Fatalf("expected error on < 2 cookies, got %v", err)
+	}
+
+	// 2. Missing c_user or xs
+	_, err = registry.Create(ctx, types.SessionCreateInput{
+		Cookies: []types.CookieInput{
+			{Name: "c_user", Value: "123"},
+			{Name: "other", Value: "456"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "c_user") {
+		t.Fatalf("expected error on missing xs cookie, got %v", err)
+	}
+
+	// 3. Duplicate cookie names
+	_, err = registry.Create(ctx, types.SessionCreateInput{
+		Cookies: []types.CookieInput{
+			{Name: "c_user", Value: "123"},
+			{Name: "xs", Value: "456"},
+			{Name: "c_user", Value: "789"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cookie duplicada") {
+		t.Fatalf("expected error on duplicate cookie name, got %v", err)
+	}
+
+	// 4. Expired cookie
+	expiredUnix := float64(time.Now().Add(-10 * time.Minute).Unix())
+	_, err = registry.Create(ctx, types.SessionCreateInput{
+		Cookies: []types.CookieInput{
+			{Name: "c_user", Value: "123", ExpirationDate: expiredUnix},
+			{Name: "xs", Value: "456"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "ya ha expirado") {
+		t.Fatalf("expected error on expired cookie, got %v", err)
+	}
+}
+
+func TestSessionRecord_CircuitBreakerAndExecutionGate(t *testing.T) {
+	rec := &SessionRecord{
+		SessionID:  "test-sess-1",
+		TenantID:   "default",
+		FacebookID: "10001",
+		Status:     StatusActive,
+	}
+
+	// 1. Active record can execute
+	if err := rec.CanExecute(); err != nil {
+		t.Fatalf("expected active record to allow execution, got %v", err)
+	}
+
+	// 2. Acquire slot & release
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := rec.AcquireExecutionSlot(ctx); err != nil {
+		t.Fatalf("expected execution slot acquisition, got %v", err)
+	}
+	rec.ReleaseExecutionSlot()
+
+	// 3. HandleHTTPResult for 403 / Account restricted transitions to Blocked
+	rec.HandleHTTPResult(httputil.ErrAccountRestricted)
+	if rec.Status != StatusBlocked {
+		t.Fatalf("expected status %s after 403, got %s", StatusBlocked, rec.Status)
+	}
+	if err := rec.CanExecute(); err == nil {
+		t.Fatal("expected CanExecute to reject blocked session")
+	}
+
+	// 4. HandleHTTPResult for 401 transitions to Error
+	rec.HandleHTTPResult(httputil.ErrSessionExpired)
+	if rec.Status != StatusError {
+		t.Fatalf("expected status %s after 401, got %s", StatusError, rec.Status)
 	}
 }

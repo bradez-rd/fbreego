@@ -18,7 +18,7 @@ go.work.sum
 # Environment variables
 .env
 *.env.local
-tests\default_cookies
+/tests/default_cookies/
 
 # IDE and editors
 .idea/

@@ -42,7 +42,7 @@ fbreego/
 │ ├── runner/ # Ciclo de vida del servidor y apagado gracioso
 │ ├── sessions/ # Almacén de sesiones cifrado AES-256-GCM y registro
 │ └── webhook/ # Gestión de configuraciones de webhook
-└── facebook-research/fbchat_v2/docs/migracion-go/
+└── docs/research/fbchat_v2/docs/migracion-go/
 ├── README.md # Índice general de documentación
 ├── ARQUITECTURA_GO.md # Diagramas y decisiones de diseño
 ├── INVENTARIO_FUNCIONAL.md # Inventario de los 63 archivos analizados

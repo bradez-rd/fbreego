@@ -1,0 +1,34 @@
+# Changelog — fbreego
+
+Todas las modificaciones notables a este proyecto son documentadas en este archivo.
+El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
+
+---
+
+## [2.3.4-dev] - 2026-11-04
+
+### Añadido
+- Inicialización canónica del directorio `docs/research/` con submódulos de investigación (`mautrix-meta`, `motofb`, `fbchat`, `fca-unofficial`, `fb-messenger-e2ee`, `facebook-marketplace-mcp`, `fbchat_v2`).
+- Archivo de configuración `.gitmodules` para trazabilidad de submódulos de ingeniería inversa.
+- Documentación integral en `docs/research/README.md` alineada a `AGENTS.md`.
+- Endpoint `GET /api/v1/sessions/{sessionId}/contacts` en la API REST y especificación OpenAPI 3.0.3.
+
+### Modificado
+- Migración de `docs/facebook-research/` a `docs/research/` cumpliendo la regla de `AGENTS.md` (línea 138).
+- Corrección de la extracción de contactos y participantes en LightSpeed parser (`pkg/core/lightspeed/parser.go`) para `verifyContactRowExists`, `updateOrInsertThread` y `deleteThenInsertThread`.
+- Normalización del parámetro de cuenta activa `av` en `pkg/features/thread/batch_data.go`.
+
+### Fuentes de Investigación Consultadas
+- `docs/research/mautrix-meta` (última consulta: 2026-11-04)
+- `docs/research/motofb` (última consulta: 2026-11-04)
+- `docs/research/fbchat_v2` (última consulta: 2026-11-04)
+- `docs/research/fca-unofficial` (última consulta: 2026-11-04)
+
+---
+
+## [2.3.3] - 2026-10-21
+
+### Añadido
+- Paridad completa del microservicio Go con `fbchat_v2` (Python).
+- Servidor REST Chi v5, WebSocket hub y soporte de webhooks con firma HMAC.
+- Almacenamiento seguro de sesiones cifrado con AES-256-GCM.

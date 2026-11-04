@@ -1,0 +1,18 @@
+[submodule "docs/research/mautrix-meta"]
+	path = docs/research/mautrix-meta
+	url = https://github.com/mautrix/meta.git
+[submodule "docs/research/fb-messenger-e2ee"]
+	path = docs/research/fb-messenger-e2ee
+	url = https://github.com/HerokeyVN/FB-Messenger-E2EE.git
+[submodule "docs/research/fca-unofficial"]
+	path = docs/research/fca-unofficial
+	url = https://github.com/VangBanLaNhat/fca-unofficial.git
+[submodule "docs/research/facebook-marketplace-mcp"]
+	path = docs/research/facebook-marketplace-mcp
+	url = https://github.com/jdcodes1/facebook-marketplace-mcp.git
+[submodule "docs/research/motofb"]
+	path = docs/research/motofb
+	url = https://github.com/motovax/motofb.git
+[submodule "docs/research/fbchat"]
+	path = docs/research/fbchat
+	url = https://github.com/fbchat-dev/fbchat.git

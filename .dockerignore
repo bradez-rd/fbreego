@@ -3,6 +3,7 @@
 bin
 dist
 facebook-research
+docs/research
 reports
 tests
 *.exe

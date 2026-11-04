@@ -31,6 +31,7 @@ func OpenAPISchema() map[string]any {
 		"/api/v1/sessions/{sessionId}/listen/stop":                  pathOps("post", operation("Stop session listener")),
 		"/api/v1/sessions/{sessionId}/listen/status":                pathOps("get", operation("Get listener status")),
 		"/api/v1/sessions/{sessionId}/threads":                      pathOps("get", operation("List conversation threads")),
+		"/api/v1/sessions/{sessionId}/contacts":                     pathOps("get", operation("List known session contacts")),
 		"/api/v1/sessions/{sessionId}/threads/{threadId}/messages":  pathOps("get", operation("Get thread message history")),
 		"/api/v1/sessions/{sessionId}/threads/{threadId}/read":      pathOps("post", operation("Mark thread as read")),
 		"/api/v1/sessions/{sessionId}/threads/{threadId}/delivered": pathOps("post", operation("Mark thread as delivered")),

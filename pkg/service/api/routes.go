@@ -251,6 +251,7 @@ func (s *Server) Routes() http.Handler {
 
 		// Conversaciones / Threads
 		pr.Get("/api/v1/sessions/{sessionId}/threads", s.handleListThreads)
+		pr.Get("/api/v1/sessions/{sessionId}/contacts", s.handleListContacts)
 		pr.Get("/api/v1/sessions/{sessionId}/threads/{threadId}/messages", s.handleGetThreadMessages)
 		pr.Post("/api/v1/sessions/{sessionId}/threads/{threadId}/read", s.handleMarkThreadRead)
 		pr.Post("/api/v1/sessions/{sessionId}/threads/{threadId}/delivered", s.handleMarkThreadDelivered)

@@ -15,6 +15,7 @@ import (
 	"github.com/bradez-rd/fbreego/pkg/core/auth"
 	"github.com/bradez-rd/fbreego/pkg/core/lightspeed"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
+	"github.com/bradez-rd/fbreego/pkg/features/social"
 	"github.com/bradez-rd/fbreego/pkg/features/thread"
 	"github.com/bradez-rd/fbreego/pkg/messaging/listener"
 )
@@ -604,9 +605,17 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cookieHeader := rec.BuildCookieHeader()
+	if cookieHeader == "" && rec.ProviderData != nil {
+		cookieHeader = rec.ProviderData.CookieFacebook
+	}
+
+	var items []map[string]any = make([]map[string]any, 0)
+	var fetchErr error
+
 	threadsData, err := thread.FetchAllThreads(r.Context(), s.httpClient, rec.ProviderData)
 	if err == nil {
-		items := thread.ExtractThreadItems(threadsData)
+		items = thread.ExtractThreadItems(threadsData)
 		if len(items) > 0 {
 			JSONSuccess(w, "Threads retrieved successfully.", map[string]any{
 				"items": items,
@@ -614,26 +623,121 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 			}, http.StatusOK)
 			return
 		}
+	} else {
+		fetchErr = err
 	}
 
 	// Fallback con LightSpeed HTML parser
-	lsData, fallbackErr := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, rec.BuildCookieHeader())
-	if fallbackErr != nil && err != nil {
-		s.RecordAudit("thread_fetch_failed", fmt.Sprintf("primary: %v; fallback: %v", err, fallbackErr), sessionID)
-		JSONError(w, "THREADS_FETCH_FAILED", "Unable to retrieve threads from Facebook.", http.StatusBadGateway, nil, "")
+	lsThreads, _, fallbackErr := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, cookieHeader)
+	if fallbackErr == nil && len(lsThreads) > 0 {
+		fallbackItems := make([]map[string]any, 0, len(lsThreads))
+		for _, t := range lsThreads {
+			threadType := t.Type
+			if threadType == "" {
+				if t.IsGroup {
+					threadType = "group"
+				} else {
+					threadType = "user"
+				}
+			}
+			fallbackItems = append(fallbackItems, map[string]any{
+				"threadId":    t.ThreadID,
+				"name":        t.Name,
+				"type":        threadType,
+				"unreadCount": t.UnreadCount,
+				"updatedAt":   t.UpdatedAt,
+				"folder":      t.Folder,
+				"snippet":     t.Snippet,
+				"avatarUrl":   t.Avatar,
+			})
+		}
+		JSONSuccess(w, "Threads retrieved via LightSpeed fallback.", map[string]any{
+			"items": fallbackItems,
+			"count": len(fallbackItems),
+		}, http.StatusOK)
 		return
 	}
-	var fallbackItems []map[string]any
-	for _, t := range lsData {
-		fallbackItems = append(fallbackItems, map[string]any{
-			"threadId":    t.ThreadID,
-			"name":        t.Name,
-			"type":        "user",
-			"unreadCount": t.UnreadCount,
-		})
+
+	// Si GraphQL batch tuvo exito con 0 threads y LightSpeed tampoco trajo hilos pero no fallo
+	if err == nil {
+		JSONSuccess(w, "Threads retrieved successfully.", map[string]any{
+			"items": make([]map[string]any, 0),
+			"count": 0,
+		}, http.StatusOK)
+		return
 	}
-	JSONSuccess(w, "Threads retrieved via LightSpeed fallback.", map[string]any{
-		"items": fallbackItems,
-		"count": len(fallbackItems),
+
+	s.RecordAudit("thread_fetch_failed", fmt.Sprintf("primary: %v; fallback: %v", fetchErr, fallbackErr), sessionID)
+	JSONError(w, "THREADS_FETCH_FAILED", fmt.Sprintf("Unable to retrieve threads from Facebook: %v", fetchErr), http.StatusBadGateway, nil, "")
+}
+
+// handleListContacts obtiene la lista de contactos conocidos de la sesion a traves de LightSpeed o perfil.
+func (s *Server) handleListContacts(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	tenantID := extractTenantID(r)
+	rec, err := s.Registry.GetForTenant(sessionID, tenantID)
+	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+
+	if rec.ProviderData == nil {
+		JSONError(w, "SESSION_NOT_VALIDATED", "Session does not have provider data.", http.StatusBadRequest, nil, "")
+		return
+	}
+
+	cookieHeader := rec.BuildCookieHeader()
+	if cookieHeader == "" && rec.ProviderData != nil {
+		cookieHeader = rec.ProviderData.CookieFacebook
+	}
+
+	contactsMap := make(map[string]map[string]any)
+
+	// 1. Obtener contactos de LightSpeed
+	_, lsContacts, _ := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, cookieHeader)
+	for id, c := range lsContacts {
+		if id != "" && c.Name != "" {
+			contactsMap[id] = map[string]any{
+				"id":     c.ID,
+				"name":   c.Name,
+				"avatar": c.Avatar,
+			}
+		}
+	}
+
+	// 2. Incluir el propio perfil si no figura
+	if rec.FacebookID != "" {
+		if _, exists := contactsMap[rec.FacebookID]; !exists {
+			selfInfo, _ := social.GetUserInfo(r.Context(), s.httpClient, rec.ProviderData, rec.FacebookID)
+			name := rec.Label
+			avatar := ""
+			if selfInfo != nil {
+				if n, ok := selfInfo["nameUser"].(string); ok && n != "" {
+					name = n
+				}
+				if a, ok := selfInfo["thumbSrc"].(string); ok && a != "" {
+					avatar = a
+				}
+			}
+			contactsMap[rec.FacebookID] = map[string]any{
+				"id":     rec.FacebookID,
+				"name":   name,
+				"avatar": avatar,
+			}
+		}
+	}
+
+	items := make([]map[string]any, 0, len(contactsMap))
+	for _, c := range contactsMap {
+		items = append(items, c)
+	}
+
+	JSONSuccess(w, "Contacts retrieved successfully.", map[string]any{
+		"items": items,
+		"count": len(items),
 	}, http.StatusOK)
 }

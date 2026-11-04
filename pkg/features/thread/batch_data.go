@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/bradez-rd/fbreego/pkg/core/contracts"
@@ -30,15 +29,8 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 	}
 	queriesJSON := fmt.Sprintf(`{"o0":{"doc_id":"%s","query_params":{"limit":50,"before":null,"tags":["INBOX"],"includeDeliveryReceipts":false,"includeSeqID":true}}}`, docID)
 
-	form := url.Values{
-		"fb_dtsg": {fb.FbDtsg},
-		"jazoest": {fb.Jazoest},
-		"__user":  {fb.FacebookID},
-		"__a":     {"1"},
-		"__req":   {utils.NextRequestBase36()},
-		"__rev":   {fb.ClientRevision},
-		"queries": {queriesJSON},
-	}
+	form := utils.BuildFormAll(fb, "", "", false)
+	form.Set("queries", queriesJSON)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
@@ -72,7 +64,7 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 
 // ExtractThreadItems normaliza la respuesta cruda de GraphQL batch en una lista de hilos de fbreego.
 func ExtractThreadItems(threadsData map[string]any) []map[string]any {
-	var items []map[string]any
+	items := make([]map[string]any, 0)
 	if threadsData == nil {
 		return items
 	}
@@ -117,6 +109,38 @@ func ExtractThreadItems(threadsData map[string]any) []map[string]any {
 		}
 
 		name, _ := node["name"].(string)
+
+		// En hilos 1:1 de Facebook GraphQL, el campo `name` suele venir vacío/nulo.
+		// Extraemos el nombre del participante desde `all_participants`.
+		if strings.TrimSpace(name) == "" {
+			if ap, ok := node["all_participants"].(map[string]any); ok {
+				if edges, ok := ap["edges"].([]any); ok {
+					for _, edgeItem := range edges {
+						if edge, ok := edgeItem.(map[string]any); ok {
+							if nodeActor, ok := edge["node"].(map[string]any); ok {
+								if actor, ok := nodeActor["messaging_actor"].(map[string]any); ok {
+									actorID := fmt.Sprintf("%v", actor["id"])
+									actorName, _ := actor["name"].(string)
+									if strings.TrimSpace(actorName) != "" {
+										if name == "" {
+											name = actorName
+										}
+										if tid != "" && actorID == tid {
+											name = actorName
+											break
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if strings.TrimSpace(name) == "" && tid != "" {
+			name = "Chat " + tid
+		}
+
 		threadTypeStr, _ := node["thread_type"].(string)
 		threadType := "user"
 		isMarketplace := false

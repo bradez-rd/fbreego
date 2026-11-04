@@ -145,3 +145,4 @@ cuando se tenga que hacer un push se debe asegurar de que todo esta correcto y q
 realizar fallbacks seguros ante versiones anteriores en lugares donde sea compatible.
 la carpeta examples debe estar actualizada con los ejemplos mas recientes.
 busca en las librerias el mismo metodo o api para ver como se comunican y trata de entender como funciona la libreria para luego implementar ese mismo metodo en la nuestra.
+nos interesa principalmente sus comunicaciones con facebook.

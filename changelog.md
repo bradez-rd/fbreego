@@ -8,6 +8,10 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 ## [2.3.4-dev] - 2026-11-04
 
 ### Añadido
+- Extracción dinámica de metadatos de sesión y broker (`Region`, `MQTTEndpoint`, `MQTTClientID`, `MQTTAppID`) en `pkg/core/session/session.go`.
+- Mecanismo de refresco de tokens (`RefreshFbDtsg` y `RefreshSessionTokens`) para renovación automática de `fb_dtsg` y `jazoest`.
+- Soporte para consulta inicial de número de secuencia (`sync_sequence_id`) previa al handshake MQTT mediante GraphQL batch.
+- Suscripción completa a tópicos MQTT de Messenger (`/t_ms`, `/ls_req`, `/ls_resp`, typing, presence) y normalización del payload CONNECT (`chat_on: true` booleano).
 - Inicialización canónica y expansión del directorio `docs/research/` con 13 submódulos y fuentes de referencia:
   - Go: `mautrix-meta`, `motofb`, `hermes`
   - Python: `fbchat_v2`, `fbchat`, `unzuckify`

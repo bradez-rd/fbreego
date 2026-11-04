@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/bradez-rd/fbreego/pkg/core/types"
 )
 
 func TestMQTTListenerDoesNotReportFalseSuccess(t *testing.T) {
@@ -98,5 +100,67 @@ func TestDecodePayloadEventsMapsNestedDeltaMessageEdit(t *testing.T) {
 	}
 	if events[0].IsGroup {
 		t.Fatalf("thread equal to sender must be direct: %#v", events[0])
+	}
+}
+
+func TestBuildBrokerURL(t *testing.T) {
+	// Fallback region eag
+	urlDefault := BuildBrokerURL(&types.DataFB{}, 12345, "test-client-id")
+	if !strings.Contains(urlDefault, "region=eag") || !strings.Contains(urlDefault, "cid=test-client-id") {
+		t.Fatalf("unexpected default broker url: %s", urlDefault)
+	}
+
+	// Dynamic region
+	urlCustomRegion := BuildBrokerURL(&types.DataFB{Region: "FRC"}, 12345, "test-client-id")
+	if !strings.Contains(urlCustomRegion, "region=frc") {
+		t.Fatalf("expected lowercased region frc, got %s", urlCustomRegion)
+	}
+
+	// Custom mqtt endpoint
+	urlCustomEndpoint := BuildBrokerURL(&types.DataFB{MQTTEndpoint: "wss://custom.edge-chat.facebook.com/chat"}, 12345, "cid-999")
+	if !strings.HasPrefix(urlCustomEndpoint, "wss://custom.edge-chat.facebook.com/chat?") || !strings.Contains(urlCustomEndpoint, "cid=cid-999") {
+		t.Fatalf("unexpected endpoint url: %s", urlCustomEndpoint)
+	}
+}
+
+func TestBuildConnectPayload(t *testing.T) {
+	fb := &types.DataFB{
+		FacebookID:   "100088888",
+		MQTTClientID: "client-abc-123",
+		MQTTAppID:    "22222222",
+	}
+
+	payload := BuildConnectPayload(fb, 99999, "")
+
+	if payload["u"] != "100088888" {
+		t.Fatalf("expected u=100088888, got %v", payload["u"])
+	}
+	if payload["chat_on"] != true {
+		t.Fatalf("expected boolean true for chat_on, got %v (%T)", payload["chat_on"], payload["chat_on"])
+	}
+	if payload["d"] != "client-abc-123" {
+		t.Fatalf("expected d=client-abc-123, got %v", payload["d"])
+	}
+	if payload["aid"] != int64(22222222) {
+		t.Fatalf("expected aid=22222222, got %v", payload["aid"])
+	}
+
+	topics, ok := payload["st"].([]string)
+	if !ok || len(topics) == 0 {
+		t.Fatalf("expected string slice for st, got %#v", payload["st"])
+	}
+
+	hasTMS := false
+	hasLSReq := false
+	for _, top := range topics {
+		if top == "/t_ms" {
+			hasTMS = true
+		}
+		if top == "/ls_req" {
+			hasLSReq = true
+		}
+	}
+	if !hasTMS || !hasLSReq {
+		t.Fatalf("expected /t_ms and /ls_req in topics, got %v", topics)
 	}
 }

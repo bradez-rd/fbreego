@@ -171,3 +171,41 @@ func ExtractThreadItems(threadsData map[string]any) []map[string]any {
 	}
 	return items
 }
+
+// ExtractSyncSequenceID extrae el sync_sequence_id devuelto por la consulta GraphQLBatch para sincronización inicial MQTT.
+func ExtractSyncSequenceID(threadsData map[string]any) int64 {
+	if threadsData == nil {
+		return 0
+	}
+	o0, _ := threadsData["o0"].(map[string]any)
+	if o0 == nil {
+		o0 = threadsData
+	}
+	data, _ := o0["data"].(map[string]any)
+	if data == nil {
+		return 0
+	}
+	viewer, _ := data["viewer"].(map[string]any)
+	if viewer == nil {
+		return 0
+	}
+	mt, _ := viewer["message_threads"].(map[string]any)
+	if mt == nil {
+		return 0
+	}
+
+	switch val := mt["sync_sequence_id"].(type) {
+	case float64:
+		return int64(val)
+	case int64:
+		return val
+	case int:
+		return int64(val)
+	case string:
+		var parsed int64
+		if _, err := fmt.Sscanf(strings.TrimSpace(val), "%d", &parsed); err == nil {
+			return parsed
+		}
+	}
+	return 0
+}

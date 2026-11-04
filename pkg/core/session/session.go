@@ -48,6 +48,11 @@ var (
 
 	// Hash
 	hashRegex = regexp.MustCompile(`"hash"\s*:\s*"([^"]+)"`)
+
+	// MQTT & Broker config
+	mqttEndpointRegex = regexp.MustCompile(`"endpoint"\s*:\s*"([^"]*?region=([a-zA-Z0-9_-]+)[^"]*)"`)
+	mqttClientIDRegex = regexp.MustCompile(`\[\s*"MqttWebDeviceID"[^}]*?"clientID"\s*:\s*"([^"]+)"`)
+	mqttAppIDRegex    = regexp.MustCompile(`\[\s*"MqttWebConfig"[^}]*?"appID"\s*:\s*(\d+)`)
 )
 
 // ComputeJazoest calcula matemáticamente el parámetro jazoest a partir de fb_dtsg según el algoritmo oficial de Facebook.
@@ -226,6 +231,30 @@ func ParseSessionData(html, setCookies string) (*types.DataFB, error) {
 		data.ClientRevision = "101827412"
 	}
 
+	// 8. Extraer Endpoint y Región MQTT
+	if m := mqttEndpointRegex.FindStringSubmatch(html); len(m) > 2 {
+		endpoint := strings.ReplaceAll(m[1], `\/`, `/`)
+		endpoint = strings.ReplaceAll(endpoint, `\u0026`, `&`)
+		data.MQTTEndpoint = endpoint
+		data.Region = m[2]
+	}
+	if data.Region == "" {
+		data.Region = "eag"
+	}
+
+	// 9. Extraer MqttWebDeviceID (clientID)
+	if m := mqttClientIDRegex.FindStringSubmatch(html); len(m) > 1 {
+		data.MQTTClientID = m[1]
+	}
+
+	// 10. Extraer MqttWebConfig (appID)
+	if m := mqttAppIDRegex.FindStringSubmatch(html); len(m) > 1 {
+		data.MQTTAppID = m[1]
+	}
+	if data.MQTTAppID == "" {
+		data.MQTTAppID = "219994525426954"
+	}
+
 	// Validación estricta de campos requeridos
 	ok, missing := data.HasRequiredFields()
 	if !ok {
@@ -302,4 +331,79 @@ func ExtractSession(ctx context.Context, client *http.Client, setCookies string,
 	}
 
 	return ParseSessionData(string(bodyBytes), setCookies)
+}
+
+// RefreshFbDtsg consulta Facebook usando las cookies de la sesión existente para actualizar fb_dtsg, jazoest
+// y los metadatos dinámicos del broker MQTT, mitigando la expiración de tokens por inactividad (>24h).
+func RefreshFbDtsg(ctx context.Context, client *http.Client, data *types.DataFB) error {
+	if data == nil || strings.TrimSpace(data.CookieFacebook) == "" {
+		return fmt.Errorf("sesión no configurada o cookies ausentes")
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	baseURL := contracts.DefaultRegistry().GetEndpoint("base")
+	if baseURL == "" {
+		baseURL = contracts.DefaultFacebookBaseURL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/", nil)
+	if err != nil {
+		return fmt.Errorf("error al construir petición de refresh: %w", err)
+	}
+
+	utils.ApplyHeaders(req, "www.facebook.com")
+	req.Header.Set("Cookie", data.CookieFacebook)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("fallo de red al consultar refresh de sesión: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return err
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("error al leer respuesta de refresh: %w", err)
+	}
+
+	refreshed, err := ParseSessionData(string(bodyBytes), data.CookieFacebook)
+	if err != nil {
+		return fmt.Errorf("error al analizar tokens refrescados: %w", err)
+	}
+
+	if refreshed.FbDtsg != "" {
+		data.FbDtsg = refreshed.FbDtsg
+		data.Jazoest = refreshed.Jazoest
+	}
+	if refreshed.FbDtsgAg != "" {
+		data.FbDtsgAg = refreshed.FbDtsgAg
+	}
+	if refreshed.Region != "" {
+		data.Region = refreshed.Region
+	}
+	if refreshed.MQTTEndpoint != "" {
+		data.MQTTEndpoint = refreshed.MQTTEndpoint
+	}
+	if refreshed.MQTTClientID != "" {
+		data.MQTTClientID = refreshed.MQTTClientID
+	}
+	if refreshed.MQTTAppID != "" {
+		data.MQTTAppID = refreshed.MQTTAppID
+	}
+	if refreshed.ClientRevision != "" {
+		data.ClientRevision = refreshed.ClientRevision
+	}
+
+	return nil
+}
+
+// RefreshSessionTokens es un alias ergonómico para RefreshFbDtsg.
+func RefreshSessionTokens(ctx context.Context, client *http.Client, data *types.DataFB) error {
+	return RefreshFbDtsg(ctx, client, data)
 }

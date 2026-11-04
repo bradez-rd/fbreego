@@ -482,6 +482,9 @@ func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mqttListener := listener.NewMQTTListener(rec.ProviderData)
+	if s.httpClient != nil {
+		mqttListener.SetHTTPClient(s.httpClient)
+	}
 
 	worker := func(ctx context.Context) {
 		if err := mqttListener.Start(ctx); err != nil {

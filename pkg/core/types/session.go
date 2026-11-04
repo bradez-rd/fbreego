@@ -28,6 +28,10 @@ type DataFB struct {
 	AppID                  int64  `json:"app_id,omitempty"`
 	WADeviceID             int    `json:"wa_device_id,omitempty"`
 	E2EEDeviceUUID         string `json:"e2ee_device_uuid,omitempty"`
+	Region                 string `json:"region,omitempty"`
+	MQTTEndpoint           string `json:"mqtt_endpoint,omitempty"`
+	MQTTClientID           string `json:"mqtt_client_id,omitempty"`
+	MQTTAppID              string `json:"mqtt_app_id,omitempty"`
 }
 
 // HasRequiredFields verifica si todos los campos requeridos de la sesión están presentes y son no vacíos.

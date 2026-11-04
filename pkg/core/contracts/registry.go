@@ -32,6 +32,7 @@ const (
 	DefaultDocIDProfessionalMode    = "4920194019284712"
 	DefaultDocIDFeedStoryArchive    = "5129402940471201"
 	DefaultDocIDPrivacyBlockUser    = "3829104820491023"
+	DefaultDocIDSyncSequence        = "1349387578499440"
 	DefaultVersionIDEditMessage     = "7191105584282302"
 )
 
@@ -92,6 +93,12 @@ func NewRegistry() *Registry {
 		DocID:        DefaultDocIDThreadList,
 		Endpoint:     DefaultBatchQueryURL,
 		Description:  "Consulta GraphQLBatch para obtener conversaciones en bandeja de entrada (INBOX)",
+	}
+	r.operations["SyncSequenceQuery"] = OperationContract{
+		FriendlyName: "SyncSequenceQuery",
+		DocID:        DefaultDocIDSyncSequence,
+		Endpoint:     DefaultBatchQueryURL,
+		Description:  "Consulta GraphQLBatch para obtener el sync_sequence_id inicial de la bandeja de entrada",
 	}
 	r.operations["MessageRequestsQuery"] = OperationContract{
 		FriendlyName: "MessageRequestsQuery",

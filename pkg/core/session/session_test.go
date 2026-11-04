@@ -1,8 +1,14 @@
 package session
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/types"
 )
 
 func TestParseHomeResponse_Valid(t *testing.T) {
@@ -132,5 +138,92 @@ func TestParseSessionData_LoginOrCheckpointDetection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sesión expirada") && !strings.Contains(err.Error(), "facebook solicitó inicio de sesión") {
 		t.Errorf("error inesperado: %v", err)
+	}
+}
+
+func TestParseSessionData_MQTTMetadata(t *testing.T) {
+	html := `
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<script>["DTSGInitialData",[],{"token":"NAcDTSG123"}]</script>
+			<script>["CurrentUserInitialData",[],{"USER_ID":"1000111222333"}]</script>
+			<script>["MqttWebDeviceID",[],{"clientID":"device-client-uuid-999"}]</script>
+			<script>["MqttWebConfig",[],{"appID":219994525426954}]</script>
+			<script>{"endpoint":"https:\/\/edge-chat.facebook.com\/chat?region=prn\u0026sid=123"}</script>
+		</head>
+		<body>
+			<input type="hidden" name="jazoest" value="21234" />
+			<script>{"sessionId":"session_val","client_revision":101827412}</script>
+		</body>
+		</html>
+	`
+	data, err := ParseSessionData(html, "c_user=1000111222333;")
+	if err != nil {
+		t.Fatalf("ParseSessionData falló: %v", err)
+	}
+
+	if data.Region != "prn" {
+		t.Errorf("Region esperada 'prn', obtenida '%s'", data.Region)
+	}
+	if data.MQTTClientID != "device-client-uuid-999" {
+		t.Errorf("MQTTClientID esperado 'device-client-uuid-999', obtenido '%s'", data.MQTTClientID)
+	}
+	if data.MQTTAppID != "219994525426954" {
+		t.Errorf("MQTTAppID esperado '219994525426954', obtenido '%s'", data.MQTTAppID)
+	}
+	if !strings.Contains(data.MQTTEndpoint, "region=prn") {
+		t.Errorf("MQTTEndpoint no contiene region=prn: %s", data.MQTTEndpoint)
+	}
+}
+
+func TestRefreshFbDtsg_Success(t *testing.T) {
+	newHTML := `
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<script>["DTSGInitialData",[],{"token":"AQNewRefreshedDTSG"}]</script>
+			<script>["CurrentUserInitialData",[],{"USER_ID":"1000999888777"}]</script>
+			<script>["MqttWebDeviceID",[],{"clientID":"new-device-id"}]</script>
+			<script>{"endpoint":"https:\/\/edge-chat.facebook.com\/chat?region=lla\u0026sid=999"}</script>
+		</head>
+		<body>
+			<input type="hidden" name="jazoest" value="29999" />
+			<script>{"sessionId":"new_session","client_revision":101827499}</script>
+		</body>
+		</html>
+	`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(newHTML))
+	}))
+	defer srv.Close()
+
+	// Guardar endpoint previo y restaurarlo
+	prevBase := contracts.DefaultRegistry().GetEndpoint("base")
+	contracts.DefaultRegistry().SetEndpoint("base", srv.URL)
+	defer contracts.DefaultRegistry().SetEndpoint("base", prevBase)
+
+	sessionData := &types.DataFB{
+		FacebookID:     "1000999888777",
+		FbDtsg:         "AQOldDTSG",
+		Jazoest:        "21111",
+		CookieFacebook: "c_user=1000999888777; xs=sample_xs;",
+	}
+
+	err := RefreshFbDtsg(context.Background(), srv.Client(), sessionData)
+	if err != nil {
+		t.Fatalf("RefreshFbDtsg falló: %v", err)
+	}
+
+	if sessionData.FbDtsg != "AQNewRefreshedDTSG" {
+		t.Errorf("FbDtsg esperado 'AQNewRefreshedDTSG', obtenido '%s'", sessionData.FbDtsg)
+	}
+	if sessionData.Region != "lla" {
+		t.Errorf("Region esperada 'lla', obtenida '%s'", sessionData.Region)
+	}
+	if sessionData.MQTTClientID != "new-device-id" {
+		t.Errorf("MQTTClientID esperado 'new-device-id', obtenido '%s'", sessionData.MQTTClientID)
 	}
 }

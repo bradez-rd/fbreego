@@ -17,9 +17,33 @@ import (
 
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
+	"github.com/bradez-rd/fbreego/pkg/features/thread"
 )
 
 var ErrTransportUnavailable = errors.New("el transporte MQTT de Messenger no está implementado")
+
+// MessengerSubscribeTopics lista los tópicos MQTT oficiales a los que se suscribe la sesión web de Messenger.
+var MessengerSubscribeTopics = []string{
+	"/legacy_web",
+	"/webrtc",
+	"/rtc_multi",
+	"/onevc",
+	"/br_sr",
+	"/sr_res",
+	"/t_ms",
+	"/thread_typing",
+	"/orca_typing_notifications",
+	"/notify_disconnect",
+	"/orca_presence",
+	"/inbox",
+	"/mercury",
+	"/messaging_events",
+	"/orca_message_notifications",
+	"/pp",
+	"/webrtc_response",
+	"/ls_req",
+	"/ls_resp",
+}
 
 // MQTTListener implementa la conexión activa y escucha de eventos de mensajería mediante MQTT sobre WebSockets de Facebook.
 type MQTTListener struct {
@@ -30,6 +54,7 @@ type MQTTListener struct {
 	cancel      context.CancelFunc
 	messageChan chan DeltaMessage
 	client      mqtt.Client
+	httpClient  *http.Client
 	syncToken   string
 }
 
@@ -42,8 +67,78 @@ func NewMQTTListener(fb *types.DataFB) *MQTTListener {
 	}
 }
 
+// SetHTTPClient asigna un cliente HTTP para operaciones auxiliares como descubrimiento de sequence ID.
+func (l *MQTTListener) SetHTTPClient(client *http.Client) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.httpClient = client
+}
+
 // Messages expone el canal de lectura para eventos de mensajes entrantes.
 func (l *MQTTListener) Messages() <-chan DeltaMessage { return l.messageChan }
+
+// BuildBrokerURL construye la URL WSS del broker de chat de Facebook basada en la región y el endpoint de la sesión.
+func BuildBrokerURL(fb *types.DataFB, sessionID int64, clientID string) string {
+	region := "eag"
+	if fb != nil && fb.Region != "" {
+		region = strings.ToLower(fb.Region)
+	}
+	if clientID == "" {
+		if fb != nil && fb.MQTTClientID != "" {
+			clientID = fb.MQTTClientID
+		} else {
+			clientID = utils.GenerateClientID()
+		}
+	}
+	if fb != nil && fb.MQTTEndpoint != "" {
+		sep := "?"
+		if strings.Contains(fb.MQTTEndpoint, "?") {
+			sep = "&"
+		}
+		return fmt.Sprintf("%s%ssid=%d&cid=%s", fb.MQTTEndpoint, sep, sessionID, clientID)
+	}
+	return fmt.Sprintf("wss://edge-chat.facebook.com/chat?region=%s&sid=%d&cid=%s", region, sessionID, clientID)
+}
+
+// BuildConnectPayload genera la estructura JSON requerida en el handshake MQTT CONNECT de Facebook.
+func BuildConnectPayload(fb *types.DataFB, sessionID int64, clientID string) map[string]any {
+	fbID := ""
+	if fb != nil {
+		fbID = fb.FacebookID
+	}
+	if clientID == "" {
+		if fb != nil && fb.MQTTClientID != "" {
+			clientID = fb.MQTTClientID
+		} else {
+			clientID = utils.GenerateClientID()
+		}
+	}
+	appID := int64(219994525426954)
+	if fb != nil && fb.MQTTAppID != "" {
+		if parsed, err := strconv.ParseInt(fb.MQTTAppID, 10, 64); err == nil && parsed > 0 {
+			appID = parsed
+		}
+	}
+
+	return map[string]any{
+		"u":          fbID,
+		"s":          sessionID,
+		"chat_on":    true,
+		"fg":         false,
+		"d":          clientID,
+		"ct":         "websocket",
+		"aid":        appID,
+		"mqtt_sid":   "",
+		"cp":         3,
+		"ecp":        10,
+		"st":         MessengerSubscribeTopics,
+		"pm":         []any{},
+		"dc":         "",
+		"no_auto_fg": true,
+		"gas":        nil,
+		"pack":       []any{},
+	}
+}
 
 // Start inicia la conexión MQTT sobre WebSocket con edge-chat.facebook.com.
 func (l *MQTTListener) Start(ctx context.Context) error {
@@ -57,26 +152,13 @@ func (l *MQTTListener) Start(ctx context.Context) error {
 	}
 
 	sessionID := utils.GenerateSessionID()
-	brokerURL := fmt.Sprintf("wss://edge-chat.facebook.com/chat?region=eag&sid=%d", sessionID)
-
-	userPayload := map[string]any{
-		"u":          l.fb.FacebookID,
-		"s":          sessionID,
-		"chat_on":    "true",
-		"fg":         false,
-		"d":          utils.GenerateClientID(),
-		"ct":         "websocket",
-		"aid":        219994525426954,
-		"mqtt_sid":   "",
-		"cp":         3,
-		"ecp":        10,
-		"st":         "/t_ms",
-		"pm":         []any{},
-		"dc":         "",
-		"no_auto_fg": true,
-		"gas":        nil,
-		"pack":       []any{},
+	clientID := l.fb.MQTTClientID
+	if clientID == "" {
+		clientID = utils.GenerateClientID()
 	}
+
+	brokerURL := BuildBrokerURL(l.fb, sessionID, clientID)
+	userPayload := BuildConnectPayload(l.fb, sessionID, clientID)
 	userBytes, _ := json.Marshal(userPayload)
 
 	opts := mqtt.NewClientOptions()
@@ -98,6 +180,9 @@ func (l *MQTTListener) Start(ctx context.Context) error {
 	opts.SetHTTPHeaders(headers)
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
+		for _, topic := range MessengerSubscribeTopics {
+			c.Subscribe(topic, 0, nil)
+		}
 		l.publishSyncQueue(c)
 	})
 
@@ -118,6 +203,15 @@ func (l *MQTTListener) Start(ctx context.Context) error {
 
 func (l *MQTTListener) publishSyncQueue(c mqtt.Client) {
 	seqID := l.syncMgr.GetLastSeqID()
+	if seqID == 0 && l.httpClient != nil && l.fb != nil {
+		if threadsData, err := thread.FetchAllThreads(context.Background(), l.httpClient, l.fb); err == nil {
+			if discovered := thread.ExtractSyncSequenceID(threadsData); discovered > 0 {
+				seqID = discovered
+				l.syncMgr.UpdateSeqID(discovered)
+			}
+		}
+	}
+
 	queue := map[string]any{
 		"sync_api_version":           10,
 		"max_deltas_able_to_process": 1000,

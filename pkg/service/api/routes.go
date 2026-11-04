@@ -94,6 +94,8 @@ func (s *Server) Routes() http.Handler {
 					"search",
 					"blocking",
 					"marketplace-read",
+					"marketplace-search",
+					"marketplace-publish",
 					"traffic-inspection",
 				},
 				"capabilityMatrix": map[string]any{
@@ -132,6 +134,14 @@ func (s *Server) Routes() http.Handler {
 					"marketplace.read": map[string]string{
 						"status":      "supported",
 						"description": "Fetch public Marketplace listings",
+					},
+					"marketplace.search": map[string]string{
+						"status":      "supported",
+						"description": "Search public Marketplace listings with filters",
+					},
+					"marketplace.create": map[string]string{
+						"status":      "supported",
+						"description": "Publish Comet Marketplace product listings",
 					},
 					"traffic.inspector": map[string]string{
 						"status":      map[bool]string{true: "supported", false: "disabled"}[s.TrafficEnabled],
@@ -268,7 +278,9 @@ func (s *Server) Routes() http.Handler {
 		pr.Get("/api/v1/sessions/{sessionId}/users/{userId}", s.handleGetUserInfo)
 		pr.Get("/api/v1/sessions/{sessionId}/search", s.handleSearchUsers)
 		pr.Post("/api/v1/sessions/{sessionId}/privacy/block", s.handleBlockUser)
+		pr.Get("/api/v1/sessions/{sessionId}/marketplace/search", s.handleSearchMarketplace)
 		pr.Get("/api/v1/sessions/{sessionId}/marketplace/{itemId}", s.handleGetMarketplaceItem)
+		pr.Post("/api/v1/sessions/{sessionId}/marketplace", s.handleCreateMarketplaceItem)
 
 		// Webhook
 		pr.Get("/api/v1/webhook", s.handleGetWebhookConfig)

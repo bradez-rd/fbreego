@@ -8,6 +8,9 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 ## [2.3.4-dev] - 2026-11-04
 
 ### Añadido
+- Búsqueda en Facebook Marketplace (`SearchMarketplace`) con GraphQL `doc_id: 7111939778879383`, soporte de coordenadas, radio, filtros de precio y paginación por cursor (referencia `docs/research/facebook-marketplace-mcp`).
+- Actualización de la mutación de publicación en Marketplace (`CreateMarketplaceItem`) con `useCometMarketplaceListingCreateMutation` y `doc_id: 5033081016747999`, taxonomía de categorías de Meta y soporte de imágenes asociadas `photo_ids` (referencia `docs/research/fbchat_v2`).
+- Nuevos endpoints REST `GET /api/v1/sessions/{sessionId}/marketplace/search` y `POST /api/v1/sessions/{sessionId}/marketplace` con validación DTO y documentación OpenAPI 3.0.3.
 - Extracción dinámica de metadatos de sesión y broker (`Region`, `MQTTEndpoint`, `MQTTClientID`, `MQTTAppID`) en `pkg/core/session/session.go`.
 - Mecanismo de refresco de tokens (`RefreshFbDtsg` y `RefreshSessionTokens`) para renovación automática de `fb_dtsg` y `jazoest`.
 - Soporte para consulta inicial de número de secuencia (`sync_sequence_id`) previa al handshake MQTT mediante GraphQL batch.

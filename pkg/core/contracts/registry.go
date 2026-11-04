@@ -33,6 +33,9 @@ const (
 	DefaultDocIDFeedStoryArchive    = "5129402940471201"
 	DefaultDocIDPrivacyBlockUser    = "3829104820491023"
 	DefaultDocIDSyncSequence        = "1349387578499440"
+	DefaultDocIDMarketplaceSearch   = "7111939778879383"
+	DefaultDocIDMarketplaceCreate   = "5033081016747999"
+	DefaultDocIDMarketplaceDetail   = "6720440741405337"
 	DefaultVersionIDEditMessage     = "7191105584282302"
 )
 
@@ -135,6 +138,24 @@ func NewRegistry() *Registry {
 		DocID:        DefaultVersionIDEditMessage,
 		Endpoint:     DefaultSendURL,
 		Description:  "Identificador de versión de payload para edición de mensajes LightSpeed",
+	}
+	r.operations["MarketplaceSearchQuery"] = OperationContract{
+		FriendlyName: "MarketplaceSearchQuery",
+		DocID:        DefaultDocIDMarketplaceSearch,
+		Endpoint:     DefaultGraphQLURL,
+		Description:  "Consulta GraphQL para buscar artículos en Facebook Marketplace",
+	}
+	r.operations["MarketplaceCreateMutation"] = OperationContract{
+		FriendlyName: "useCometMarketplaceListingCreateMutation",
+		DocID:        DefaultDocIDMarketplaceCreate,
+		Endpoint:     DefaultGraphQLURL,
+		Description:  "Mutación GraphQL para publicar un artículo en Facebook Marketplace",
+	}
+	r.operations["MarketplaceDetailQuery"] = OperationContract{
+		FriendlyName: "MarketplaceProductItemDetailQuery",
+		DocID:        DefaultDocIDMarketplaceDetail,
+		Endpoint:     DefaultGraphQLURL,
+		Description:  "Consulta GraphQL para obtener detalle de un artículo en Facebook Marketplace",
 	}
 
 	return r

@@ -50,7 +50,7 @@ func currentAuthConfiguration() authConfiguration {
 		password = strings.TrimSpace(os.Getenv("FBCHAT_API_PASSWORD"))
 	}
 	configured := username != "" && password != ""
-	
+
 	required := true
 	if v := os.Getenv("FBCHAT_API_AUTH_REQUIRED"); v != "" {
 		required = envFlag("FBCHAT_API_AUTH_REQUIRED", true)
@@ -73,16 +73,17 @@ func ValidateRuntimeConfiguration() error {
 	if secret == "" {
 		secret = strings.TrimSpace(os.Getenv("FBCHAT_SESSION_SECRET"))
 	}
-	if secret != "" {
-		if len(secret) < 32 {
-			return fmt.Errorf("FBREEGO_SESSION_SECRET debe contener al menos 32 caracteres criptogr\u00e1ficamente seguros")
-		}
-		secretLower := strings.ToLower(secret)
-		if secretLower == "fbchat-default-development-secret-key-change-in-production" ||
-			strings.Contains(secretLower, "change-in-production") ||
-			strings.Contains(secretLower, "change-me") {
-			return fmt.Errorf("FBREEGO_SESSION_SECRET utiliza una clave predeterminada o insegura conocida; configure una clave generada aleatoriamente")
-		}
+	if secret == "" {
+		return fmt.Errorf("FBREEGO_SESSION_SECRET es obligatorio para el cifrado de sesiones y webhooks")
+	}
+	if len(secret) < 32 {
+		return fmt.Errorf("FBREEGO_SESSION_SECRET debe contener al menos 32 caracteres criptogr\u00e1ficamente seguros")
+	}
+	secretLower := strings.ToLower(secret)
+	if secretLower == "fbchat-default-development-secret-key-change-in-production" ||
+		strings.Contains(secretLower, "change-in-production") ||
+		strings.Contains(secretLower, "change-me") {
+		return fmt.Errorf("FBREEGO_SESSION_SECRET utiliza una clave predeterminada o insegura conocida; configure una clave generada aleatoriamente")
 	}
 
 	config := currentAuthConfiguration()
@@ -275,6 +276,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")

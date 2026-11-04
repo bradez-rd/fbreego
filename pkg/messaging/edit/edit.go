@@ -9,11 +9,14 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const BatchQueryURL = "https://www.facebook.com/api/graphqlbatch/"
+// BatchQueryURL se conserva para no romper consumidores del paquete.
+const BatchQueryURL = contracts.DefaultBatchQueryURL
 
 // BuildEditContext construye el payload de tarea LightSpeed para editar un mensaje existente.
 func BuildEditContext(messageID, newText string) (string, error) {
@@ -26,6 +29,11 @@ func BuildEditContext(messageID, newText string) (string, error) {
 		return "", err
 	}
 
+	versionID := contracts.DocID("EditMessageVersion")
+	if versionID == "" {
+		versionID = contracts.DefaultVersionIDEditMessage
+	}
+
 	lsPayload := map[string]any{
 		"tasks": []map[string]any{
 			{
@@ -36,7 +44,7 @@ func BuildEditContext(messageID, newText string) (string, error) {
 			},
 		},
 		"epoch_id":   utils.GenerateSessionID(),
-		"version_id": "7191105584282302",
+		"version_id": versionID,
 	}
 
 	lsPayloadBytes, err := json.Marshal(lsPayload)
@@ -68,17 +76,22 @@ func EditMessage(ctx context.Context, client *http.Client, fb *types.DataFB, mes
 		return nil, fmt.Errorf("error construyendo contexto de edición: %w", err)
 	}
 
-	form := url.Values{
-		"fb_dtsg":  {fb.FbDtsg},
-		"jazoest":  {fb.Jazoest},
-		"__user":   {fb.FacebookID},
-		"__a":      {"1"},
-		"__req":    {utils.NextRequestBase36()},
-		"__rev":    {fb.ClientRevision},
-		"queries":  {fmt.Sprintf(`{"o0":{"doc_id":"7191105584282302","query_params":{"context":%s}}}`, editContext)},
+	versionID := contracts.DocID("EditMessageVersion")
+	if versionID == "" {
+		versionID = contracts.DefaultVersionIDEditMessage
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", BatchQueryURL, strings.NewReader(form.Encode()))
+	form := url.Values{
+		"fb_dtsg": {fb.FbDtsg},
+		"jazoest": {fb.Jazoest},
+		"__user":  {fb.FacebookID},
+		"__a":     {"1"},
+		"__req":   {utils.NextRequestBase36()},
+		"__rev":   {fb.ClientRevision},
+		"queries": {fmt.Sprintf(`{"o0":{"doc_id":"%s","query_params":{"context":%s}}}`, versionID, editContext)},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +108,10 @@ func EditMessage(ctx context.Context, client *http.Client, fb *types.DataFB, mes
 		return nil, fmt.Errorf("error al enviar edición de mensaje: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

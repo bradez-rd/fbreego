@@ -178,6 +178,33 @@ func TestValidateRuntimeConfiguration(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeConfigurationRequiresSessionSecret(t *testing.T) {
+	t.Setenv("FBREEGO_SESSION_SECRET", "")
+	t.Setenv("FBCHAT_SESSION_SECRET", "")
+	t.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
+	if ValidateRuntimeConfiguration() == nil {
+		t.Fatal("expected missing session secret to fail runtime validation")
+	}
+}
+
+func TestCORSMiddlewareVariesByAllowedOrigin(t *testing.T) {
+	t.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
+	t.Setenv("FBREEGO_API_CORS_ORIGINS", "https://portal.example")
+	_, handler := setupTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://portal.example")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Vary"), "Origin") {
+		t.Fatalf("expected Vary: Origin, got %q", w.Header().Get("Vary"))
+	}
+}
+
 func TestAuthenticationIsRequiredByDefault(t *testing.T) {
 	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "")
 	t.Setenv("FBCHAT_API_USERNAME", "")

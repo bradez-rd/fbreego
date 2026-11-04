@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
@@ -54,16 +56,16 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 	queries := fmt.Sprintf(`{"o0":{"doc_id":"3449967031715030","query_params":%s}}`, string(queryParamsJSON))
 
 	form := url.Values{
-		"fb_dtsg":  {fb.FbDtsg},
-		"jazoest":  {fb.Jazoest},
-		"__user":   {fb.FacebookID},
-		"__a":      {"1"},
-		"__req":    {utils.NextRequestBase36()},
-		"__rev":    {fb.ClientRevision},
-		"queries":  {queries},
+		"fb_dtsg": {fb.FbDtsg},
+		"jazoest": {fb.Jazoest},
+		"__user":  {fb.FacebookID},
+		"__a":     {"1"},
+		"__req":   {utils.NextRequestBase36()},
+		"__rev":   {fb.ClientRevision},
+		"queries": {queries},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", BatchQueryURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +82,10 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 		return nil, fmt.Errorf("error de red al consultar mensajes de hilo: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -8,17 +8,27 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/bradez-rd/fbreego/pkg/core/contracts"
+	"github.com/bradez-rd/fbreego/pkg/core/httputil"
 	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/core/utils"
 )
 
-const BatchQueryURL = "https://www.facebook.com/api/graphqlbatch/"
+// BatchQueryURL se mantiene como constante por compatibilidad con consumidores anteriores.
+// Las peticiones internas usan el registro de contratos para admitir overrides en runtime.
+const BatchQueryURL = contracts.DefaultBatchQueryURL
 
 // FetchAllThreads obtiene mediante una consulta GraphQLBatch la lista estructurada de conversaciones de la cuenta.
 func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB) (map[string]any, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+
+	docID := contracts.DocID("ThreadListQuery")
+	if docID == "" {
+		docID = contracts.DefaultDocIDThreadList
+	}
+	queriesJSON := fmt.Sprintf(`{"o0":{"doc_id":"%s","query_params":{"limit":50,"before":null,"tags":["INBOX"],"includeDeliveryReceipts":false,"includeSeqID":true}}}`, docID)
 
 	form := url.Values{
 		"fb_dtsg": {fb.FbDtsg},
@@ -27,10 +37,10 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 		"__a":     {"1"},
 		"__req":   {utils.NextRequestBase36()},
 		"__rev":   {fb.ClientRevision},
-		"queries": {`{"o0":{"doc_id":"3336396659757871","query_params":{"limit":50,"before":null,"tags":["INBOX"],"includeDeliveryReceipts":false,"includeSeqID":true}}}`},
+		"queries": {queriesJSON},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", BatchQueryURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +57,10 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 		return nil, fmt.Errorf("error al consultar conversaciones batch: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := httputil.CheckHTTPResponse(resp); err != nil {
+		return nil, err
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

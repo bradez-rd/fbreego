@@ -26,7 +26,7 @@ const (
 
 // DocIDs y VersionIDs canónicos de las operaciones de Facebook Messenger conocidas.
 const (
-	DefaultDocIDThreadList          = "2289680371118670"
+	DefaultDocIDThreadList          = "3336396659757871"
 	DefaultDocIDMessageRequests     = "2289680371118670"
 	DefaultDocIDMessagingThemeQuery = "1761643933953838"
 	DefaultDocIDProfessionalMode    = "4920194019284712"

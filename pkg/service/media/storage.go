@@ -172,10 +172,14 @@ func (s *MediaStorage) GetInfo(mediaID string) (*MediaRecord, error) {
 // GetFilePath devuelve la ruta física al archivo del medio en disco.
 func (s *MediaStorage) GetFilePath(mediaID string) (string, error) {
 	rec, err := s.GetInfo(mediaID)
-	if err != nil {
-		return "", err
+	if err == nil {
+		return filepath.Join(s.mediaDir, rec.MediaID+"_"+rec.FileName), nil
 	}
-	return filepath.Join(s.mediaDir, rec.MediaID+"_"+rec.FileName), nil
+	matches, globErr := filepath.Glob(filepath.Join(s.mediaDir, mediaID+"_*"))
+	if globErr == nil && len(matches) > 0 {
+		return matches[0], nil
+	}
+	return "", err
 }
 
 // ListAll lista todos los medios registrados hasta un límite dado.

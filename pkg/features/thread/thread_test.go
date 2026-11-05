@@ -65,6 +65,74 @@ func TestFetchAllThreadsClassifiesHTTPError(t *testing.T) {
 	}
 }
 
+func TestParseGraphQLMessageNodeNormalizesHistoricalImage(t *testing.T) {
+	message := parseGraphQLMessageNode(map[string]any{
+		"message_id":        "mid.image.1",
+		"message_sender":    map[string]any{"id": "user-2"},
+		"message":           map[string]any{"text": ""},
+		"timestamp_precise": "1793847485447",
+		"blob_attachments": []any{map[string]any{
+			"__typename":           "MessageImage",
+			"legacy_attachment_id": "attachment-1",
+			"filename":             "image-1",
+			"original_extension":   "jpg",
+			"thumbnail":            map[string]any{"uri": "https://cdn.example/thumb.jpg"},
+			"preview":              map[string]any{"uri": "https://cdn.example/preview.jpg"},
+			"large_preview":        map[string]any{"uri": "https://cdn.example/large.jpg"},
+		}},
+	}, "thread-1", "own-user")
+
+	if len(message.Attachments) != 1 {
+		t.Fatalf("expected one image attachment, got %#v", message.Attachments)
+	}
+	attachment := message.Attachments[0]
+	if attachment["type"] != "image" || attachment["url"] != "https://cdn.example/large.jpg" {
+		t.Fatalf("unexpected canonical image attachment: %#v", attachment)
+	}
+	if attachment["fileName"] != "image-1.jpg" || attachment["mimeType"] != "image/jpeg" {
+		t.Fatalf("missing canonical image metadata: %#v", attachment)
+	}
+}
+
+func TestParseGraphQLMessageNodePrefersStickerAndNormalizesLinkFallback(t *testing.T) {
+	sticker := parseGraphQLMessageNode(map[string]any{
+		"message_id":     "mid.sticker.1",
+		"message_sender": map[string]any{"id": "user-2"},
+		"sticker": map[string]any{
+			"id":           "sticker-1",
+			"url":          "https://cdn.example/sticker.webp",
+			"sprite_image": "https://cdn.example/sticker-preview.webp",
+		},
+		"blob_attachments": []any{map[string]any{
+			"__typename": "MessageFile",
+			"url":        "https://cdn.example/ignored.pdf",
+		}},
+	}, "thread-1", "own-user")
+	if len(sticker.Attachments) != 1 || sticker.Attachments[0]["type"] != "sticker" {
+		t.Fatalf("expected sticker to take priority: %#v", sticker.Attachments)
+	}
+
+	link := parseGraphQLMessageNode(map[string]any{
+		"message_id":     "mid.link.1",
+		"message_sender": map[string]any{"id": "user-2"},
+		"extensible_attachment": map[string]any{
+			"legacy_attachment_id": "share-1",
+			"story_attachment": map[string]any{
+				"url":                 "https://marketplace.example/item/1",
+				"title_with_entities": map[string]any{"text": "Producto publicado"},
+				"description":         map[string]any{"text": "Descripción"},
+				"media":               map[string]any{"image": map[string]any{"uri": "https://cdn.example/item.jpg"}},
+			},
+		},
+	}, "thread-1", "own-user")
+	if len(link.Attachments) != 1 || link.Attachments[0]["type"] != "link" {
+		t.Fatalf("expected canonical link attachment: %#v", link.Attachments)
+	}
+	if link.Text != "Producto publicado" {
+		t.Fatalf("expected link title fallback, got %q", link.Text)
+	}
+}
+
 func TestCustomization(t *testing.T) {
 	mockResponse := `for (;;);{"payload":{"success":true}}`
 

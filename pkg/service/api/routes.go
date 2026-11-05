@@ -76,7 +76,7 @@ func (s *Server) Routes() http.Handler {
 					"configured": auth.Configured,
 				},
 				"bridge": map[string]any{
-					"ready": false,
+					"ready": s.ListenerManager != nil,
 				},
 				"capabilities": []string{
 					"sessions",
@@ -96,6 +96,7 @@ func (s *Server) Routes() http.Handler {
 					"marketplace-read",
 					"marketplace-search",
 					"marketplace-publish",
+					"marketplace-delete",
 					"traffic-inspection",
 				},
 				"capabilityMatrix": map[string]any{
@@ -104,8 +105,8 @@ func (s *Server) Routes() http.Handler {
 						"description": "Send text & replies to users and groups",
 					},
 					"messenger.receive": map[string]string{
-						"status":      "unavailable",
-						"description": "Realtime Messenger transport is not implemented in this build",
+						"status":      "supported",
+						"description": "Realtime MQTT transport with persisted-session listener restoration",
 					},
 					"messenger.threads": map[string]string{
 						"status":      "supported",
@@ -142,6 +143,10 @@ func (s *Server) Routes() http.Handler {
 					"marketplace.create": map[string]string{
 						"status":      "supported",
 						"description": "Publish Comet Marketplace product listings",
+					},
+					"marketplace.delete": map[string]string{
+						"status":      "supported",
+						"description": "Delete Comet Marketplace product listings",
 					},
 					"traffic.inspector": map[string]string{
 						"status":      map[bool]string{true: "supported", false: "disabled"}[s.TrafficEnabled],
@@ -281,6 +286,7 @@ func (s *Server) Routes() http.Handler {
 		pr.Get("/api/v1/sessions/{sessionId}/marketplace/search", s.handleSearchMarketplace)
 		pr.Get("/api/v1/sessions/{sessionId}/marketplace/{itemId}", s.handleGetMarketplaceItem)
 		pr.Post("/api/v1/sessions/{sessionId}/marketplace", s.handleCreateMarketplaceItem)
+		pr.Delete("/api/v1/sessions/{sessionId}/marketplace/{itemId}", s.handleDeleteMarketplaceItem)
 
 		// Webhook
 		pr.Get("/api/v1/webhook", s.handleGetWebhookConfig)

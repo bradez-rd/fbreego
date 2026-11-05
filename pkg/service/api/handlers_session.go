@@ -18,6 +18,7 @@ import (
 	"github.com/bradez-rd/fbreego/pkg/features/social"
 	"github.com/bradez-rd/fbreego/pkg/features/thread"
 	"github.com/bradez-rd/fbreego/pkg/messaging/listener"
+	"github.com/bradez-rd/fbreego/pkg/service/sessions"
 )
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -459,35 +460,23 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, "Session deleted successfully.", map[string]string{"sessionId": sessionID}, http.StatusOK)
 }
 
-func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionId")
-	tenantID := extractTenantID(r)
-	rec, err := s.Registry.GetForTenant(sessionID, tenantID)
-	if err != nil {
-		if strings.Contains(err.Error(), "acceso denegado") {
-			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
-			return
-		}
-		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
-		return
+func (s *Server) startSessionListener(ctx context.Context, sessionID string, rec *sessions.SessionRecord) error {
+	if rec == nil || rec.ProviderData == nil {
+		return fmt.Errorf("la sesión no contiene datos de proveedor activos")
 	}
-	if rec.ProviderData == nil {
-		JSONError(w, "SESSION_NOT_VALIDATED", "Session does not have active provider data.", http.StatusBadRequest, nil, "")
-		return
-	}
-
 	if s.ListenerManager == nil {
-		JSONError(w, "LISTENER_UNAVAILABLE", "Listener manager is not initialized.", http.StatusServiceUnavailable, nil, "")
-		return
+		return fmt.Errorf("el gestor de listeners no está inicializado")
+	}
+	if s.ListenerManager.IsListening(sessionID) {
+		return nil
 	}
 
-	mqttListener := listener.NewMQTTListener(rec.ProviderData)
-	if s.httpClient != nil {
-		mqttListener.SetHTTPClient(s.httpClient)
-	}
-
-	worker := func(ctx context.Context) {
-		if err := mqttListener.Start(ctx); err != nil {
+	worker := func(listenerCtx context.Context) {
+		mqttListener := listener.NewMQTTListener(rec.ProviderData)
+		if s.httpClient != nil {
+			mqttListener.SetHTTPClient(s.httpClient)
+		}
+		if err := mqttListener.Start(listenerCtx); err != nil {
 			s.RecordAudit("listener_error", err.Error(), sessionID)
 			return
 		}
@@ -495,13 +484,15 @@ func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-listenerCtx.Done():
 				return
 			case msg, ok := <-mqttListener.Messages():
 				if !ok {
 					return
 				}
-				s.Registry.RecordActivity(sessionID)
+				if err := s.Registry.RecordActivity(sessionID); err != nil {
+					s.RecordAudit("listener_activity_error", err.Error(), sessionID)
+				}
 				eventName := string(msg.EventType)
 				if eventName == "" {
 					eventName = string(listener.MessageReceived)
@@ -535,7 +526,64 @@ func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.ListenerManager.StartListening(context.Background(), sessionID, worker); err != nil {
+	if err := s.ListenerManager.StartListening(ctx, sessionID, worker); err != nil {
+		if s.ListenerManager.IsListening(sessionID) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// RestoreSessionListeners reactiva de forma idempotente los listeners de sesiones persistidas activas.
+func (s *Server) RestoreSessionListeners(ctx context.Context) (started, failed int) {
+	if s.Registry == nil {
+		return 0, 0
+	}
+	for _, item := range s.Registry.ListPublic("", false) {
+		sessionID, _ := item["sessionId"].(string)
+		status, _ := item["status"].(string)
+		if sessionID == "" || status != sessions.StatusActive {
+			continue
+		}
+		rec, err := s.Registry.Get(sessionID)
+		if err == nil {
+			err = s.startSessionListener(ctx, sessionID, rec)
+		}
+		if err != nil {
+			failed++
+			s.RecordAudit("listener_restore_error", err.Error(), sessionID)
+			continue
+		}
+		started++
+		s.RecordAudit("listener_restore", "MQTT listener restored", sessionID)
+	}
+	return started, failed
+}
+
+func (s *Server) handleStartListening(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	tenantID := extractTenantID(r)
+	rec, err := s.Registry.GetForTenant(sessionID, tenantID)
+	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+	if rec.ProviderData == nil {
+		JSONError(w, "SESSION_NOT_VALIDATED", "Session does not have active provider data.", http.StatusBadRequest, nil, "")
+		return
+	}
+
+	if s.ListenerManager == nil {
+		JSONError(w, "LISTENER_UNAVAILABLE", "Listener manager is not initialized.", http.StatusServiceUnavailable, nil, "")
+		return
+	}
+
+	if err := s.startSessionListener(context.Background(), sessionID, rec); err != nil {
 		JSONError(w, "LISTENER_START_FAILED", err.Error(), http.StatusBadRequest, nil, "")
 		return
 	}

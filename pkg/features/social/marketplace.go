@@ -272,17 +272,52 @@ func ParseMarketplaceSearchResult(res map[string]any) *MarketplaceSearchResult {
 
 // MarketplaceItemInput define los datos para publicar un producto en Facebook Marketplace.
 type MarketplaceItemInput struct {
-	Title       string   `json:"title"`
-	Brand       string   `json:"brand,omitempty"`
-	Price       int64    `json:"price"`
-	Currency    string   `json:"currency"`
-	Description string   `json:"description"`
-	Category    string   `json:"category"`
-	Latitude    float64  `json:"latitude"`
-	Longitude   float64  `json:"longitude"`
-	ImageIDs    []string `json:"imageIds"`
-	MediaIDs    []string `json:"mediaIds,omitempty"`
-	Hashtags    []string `json:"hashtags,omitempty"`
+	Title         string   `json:"title"`
+	Brand         string   `json:"brand,omitempty"`
+	Price         int64    `json:"price"`
+	Currency      string   `json:"currency"`
+	Description   string   `json:"description"`
+	Category      string   `json:"category"`
+	MarketplaceID string   `json:"marketplaceId,omitempty"`
+	Latitude      float64  `json:"latitude"`
+	Longitude     float64  `json:"longitude"`
+	ImageIDs      []string `json:"imageIds"`
+	MediaIDs      []string `json:"mediaIds,omitempty"`
+	Hashtags      []string `json:"hashtags,omitempty"`
+}
+
+// FetchCurrentMarketplaceID obtiene el ID regional de Marketplace mediante CometMarketplaceComposerCreateComponentQuery.
+func FetchCurrentMarketplaceID(ctx context.Context, client *http.Client, fb *types.DataFB) (string, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	docID := contracts.DefaultRegistry().GetDocID("MarketplaceComposerCreateQuery")
+	if docID == "" {
+		docID = contracts.DefaultDocIDMarketplaceComposerCreate
+	}
+
+	form := utils.BuildFormAll(fb, "CometMarketplaceComposerCreateComponentQuery", docID, true)
+	form.Set("variables", "{}")
+
+	res, err := executePost(ctx, client, fb, GraphQLURL, form)
+	if err != nil {
+		return "", err
+	}
+
+	if data, ok := res["data"].(map[string]any); ok {
+		if viewer, ok := data["viewer"].(map[string]any); ok {
+			if settings, ok := viewer["marketplace_settings"].(map[string]any); ok {
+				if current, ok := settings["current_marketplace"].(map[string]any); ok {
+					if id, ok := current["id"].(string); ok && id != "" {
+						return id, nil
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no se encontró current_marketplace.id en la respuesta")
 }
 
 // CreateMarketplaceItem publica un nuevo listado en Facebook Marketplace usando la mutación Comet de Facebook.
@@ -338,6 +373,16 @@ func CreateMarketplaceItem(ctx context.Context, client *http.Client, fb *types.D
 
 	priceStr := fmt.Sprintf("%d", item.Price)
 
+	marketplaceID := strings.TrimSpace(item.MarketplaceID)
+	if marketplaceID == "" {
+		if fetchedID, err := FetchCurrentMarketplaceID(ctx, client, fb); err == nil && fetchedID != "" {
+			marketplaceID = fetchedID
+		} else {
+			// Fallback al marketplace regional por defecto detectado en sesión real (República Dominicana / Santo Domingo)
+			marketplaceID = "1490734647688555"
+		}
+	}
+
 	variables := map[string]any{
 		"input": map[string]any{
 			"client_mutation_id": fmt.Sprintf("%d", utils.GenerateSessionID()),
@@ -345,13 +390,15 @@ func CreateMarketplaceItem(ctx context.Context, client *http.Client, fb *types.D
 			"attribution_id_v2":  attributionID,
 			"audience": map[string]any{
 				"marketplace": map[string]any{
-					"marketplace_id": fmt.Sprintf("%d", categoryID),
+					"marketplace_id": marketplaceID,
 				},
 			},
 			"data": map[string]any{
+				"client_application": nil,
 				"common": map[string]any{
 					"attribute_data_json":            string(attrBytes),
-					"category_id":                    categoryID,
+					"category_id":                    fmt.Sprintf("%d", categoryID),
+					"comments_disabled":              false,
 					"commerce_shipping_carrier":      nil,
 					"commerce_shipping_carriers":     []any{},
 					"comparable_price":               "null",
@@ -446,4 +493,40 @@ func GetMarketplaceItem(ctx context.Context, client *http.Client, fb *types.Data
 		return nil, fmt.Errorf("producto de marketplace no encontrado: %s", itemID)
 	}
 	return dataMap, nil
+}
+
+// DeleteMarketplaceItem elimina un artículo de Facebook Marketplace mediante useCometMarketplaceForSaleItemDeleteMutation.
+func DeleteMarketplaceItem(ctx context.Context, client *http.Client, fb *types.DataFB, itemID string) (map[string]any, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	if strings.TrimSpace(itemID) == "" {
+		return nil, fmt.Errorf("el ID del artículo es obligatorio")
+	}
+
+	variables := map[string]any{
+		"input": map[string]any{
+			"actor_id":              fb.FacebookID,
+			"client_mutation_id":    utils.NextRequestBase36(),
+			"batch_delete_variants": true,
+			"for_sale_item_id":      strings.TrimSpace(itemID),
+			"referral_surface":      nil,
+			"surface":               "SELLER_HUB",
+		},
+	}
+
+	varBytes, err := json.Marshal(variables)
+	if err != nil {
+		return nil, err
+	}
+
+	docID := contracts.DefaultRegistry().GetDocID("MarketplaceDeleteMutation")
+	if docID == "" {
+		docID = contracts.DefaultDocIDMarketplaceDelete
+	}
+
+	form := utils.BuildFormAll(fb, "useCometMarketplaceForSaleItemDeleteMutation", docID, true)
+	form.Set("variables", string(varBytes))
+
+	return executePost(ctx, client, fb, GraphQLURL, form)
 }

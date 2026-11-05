@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,26 @@ func TestHealthzAndReadyz(t *testing.T) {
 	// Status puede ser 200 o 503 dependiendo de si api_auth está configurado
 	if wReady.Code != http.StatusOK && wReady.Code != http.StatusServiceUnavailable {
 		t.Errorf("/readyz retornó código inesperado: %d", wReady.Code)
+	}
+}
+
+func TestRestoreSessionListenersSkipsStoppedAndReportsInvalidActiveSessions(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	srv.Registry.RegisterRecord(&sessions.SessionRecord{
+		SessionID: "stopped-session",
+		Status:    sessions.StatusStopped,
+	})
+	srv.Registry.RegisterRecord(&sessions.SessionRecord{
+		SessionID: "active-without-provider-data",
+		Status:    sessions.StatusActive,
+	})
+
+	started, failed := srv.RestoreSessionListeners(context.Background())
+	if started != 0 || failed != 1 {
+		t.Fatalf("unexpected restoration result: started=%d failed=%d", started, failed)
+	}
+	if srv.ListenerManager.IsListening("stopped-session") || srv.ListenerManager.IsListening("active-without-provider-data") {
+		t.Fatal("invalid or stopped sessions must not start listeners")
 	}
 }
 
@@ -286,6 +307,18 @@ func TestUIPortalAPISchemaCompatibility(t *testing.T) {
 		if _, ok := infoResp.Results[key]; !ok {
 			t.Errorf("app/info missing required UI key: %q", key)
 		}
+	}
+	bridge, ok := infoResp.Results["bridge"].(map[string]any)
+	if !ok || bridge["ready"] != true {
+		t.Fatalf("app/info must report the initialized realtime bridge: %v", infoResp.Results["bridge"])
+	}
+	matrix, ok := infoResp.Results["capabilityMatrix"].(map[string]any)
+	if !ok {
+		t.Fatalf("app/info capabilityMatrix has unexpected shape: %T", infoResp.Results["capabilityMatrix"])
+	}
+	receive, ok := matrix["messenger.receive"].(map[string]any)
+	if !ok || receive["status"] != "supported" {
+		t.Fatalf("app/info must advertise realtime receive support: %v", matrix["messenger.receive"])
 	}
 
 	// 2. Verify /api/v1/app/status has required UI keys

@@ -20,31 +20,60 @@ import (
 )
 
 var allowedEvents = map[string]bool{
-	"message":          true,
-	"message_sent":     true,
-	"message_received": true,
-	"session_status":   true,
-	"reaction":         true,
-	"reaction_updated": true,
-	"message_unsent":   true,
-	"error":            true,
-	"raw_event":        true,
+	"*":                 true,
+	"message.received":  true,
+	"message.sent":      true,
+	"message.edited":    true,
+	"message.deleted":   true,
+	"message.reaction":  true,
+	"message.read":      true,
+	"message.delivered": true,
+	"typing.started":    true,
+	"typing.stopped":    true,
+	"session.status":    true,
+	"error":             true,
+	"raw.event":         true,
 }
 
 var eventAliases = map[string]string{
-	"message.received": "message_received",
-	"message.sent":     "message_sent",
-	"reaction.updated": "reaction_updated",
-	"message.unsent":   "message_unsent",
-	"session.status":   "session_status",
+	"message":          "message.received",
+	"message_received": "message.received",
+	"message_sent":     "message.sent",
+	"message_updated":  "message.reaction",
+	"message.updated":  "message.reaction",
+	"reaction":         "message.reaction",
+	"reaction_updated": "message.reaction",
+	"reaction.updated": "message.reaction",
+	"message_unsent":   "message.deleted",
+	"message.unsent":   "message.deleted",
+	"session_status":   "session.status",
+	"raw_event":        "raw.event",
 }
 
-func normalizeEventName(event string) (string, bool) {
+// CanonicalEventName normaliza aliases históricos al contrato público con puntos.
+func CanonicalEventName(event string) (string, bool) {
 	event = strings.TrimSpace(event)
 	if canonical, ok := eventAliases[event]; ok {
 		event = canonical
 	}
 	return event, allowedEvents[event]
+}
+
+func normalizeEventNames(events []string) []string {
+	validEvents := make([]string, 0, len(events))
+	seenEvents := make(map[string]struct{})
+	for _, event := range events {
+		canonical, valid := CanonicalEventName(event)
+		if !valid {
+			continue
+		}
+		if _, exists := seenEvents[canonical]; exists {
+			continue
+		}
+		seenEvents[canonical] = struct{}{}
+		validEvents = append(validEvents, canonical)
+	}
+	return validEvents
 }
 
 // WebhookConfig representa la configuración persistida del webhook global.
@@ -123,6 +152,14 @@ func (s *WebhookConfigStore) Ready() error {
 	return s.initErr
 }
 
+// StateDir devuelve el directorio protegido compartido por la configuración y el outbox.
+func (s *WebhookConfigStore) StateDir() string {
+	if s == nil {
+		return ""
+	}
+	return s.stateDir
+}
+
 func (s *WebhookConfigStore) load() error {
 	path := filepath.Join(s.stateDir, "webhook_config.enc")
 	data, err := os.ReadFile(path)
@@ -156,6 +193,7 @@ func (s *WebhookConfigStore) load() error {
 	if err := json.Unmarshal(plain, &conf); err != nil {
 		return err
 	}
+	conf.Events = normalizeEventNames(conf.Events)
 	s.cached = &conf
 	return nil
 }
@@ -195,18 +233,7 @@ func (s *WebhookConfigStore) Update(enabled bool, targetURL string, events []str
 		}
 	}
 
-	var validEvents []string
-	seenEvents := make(map[string]struct{})
-	for _, e := range events {
-		canonical, valid := normalizeEventName(e)
-		if valid {
-			if _, exists := seenEvents[canonical]; exists {
-				continue
-			}
-			seenEvents[canonical] = struct{}{}
-			validEvents = append(validEvents, canonical)
-		}
-	}
+	validEvents := normalizeEventNames(events)
 
 	currentSecret := ""
 	if s.cached != nil {

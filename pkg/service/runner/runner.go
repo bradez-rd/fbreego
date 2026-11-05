@@ -120,6 +120,10 @@ func Run() {
 		os.Exit(1)
 	}
 	webhookDisp := dispatcher.NewDispatcher(webhookStore)
+	if err := webhookDisp.Ready(); err != nil {
+		logger.Error("Configuración insegura del outbox de webhook: %v", err)
+		os.Exit(1)
+	}
 	eventHub := events.NewRealtimeHub()
 	listenerMgr := events.NewSessionListenerManager(eventHub)
 	mediaStore := media.NewMediaStorage(mediaDir)
@@ -143,6 +147,10 @@ func Run() {
 	)
 
 	webhookDisp.Start(ctx)
+	restoredListeners, failedListeners := server.RestoreSessionListeners(ctx)
+	if restoredListeners > 0 || failedListeners > 0 {
+		logger.Info("Restauración de listeners MQTT: iniciados=%d fallidos=%d", restoredListeners, failedListeners)
+	}
 
 	httpServer := &http.Server{
 		Addr:         addr,

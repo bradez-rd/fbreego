@@ -5,7 +5,7 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
-## [2.3.4-dev] - 2026-11-04
+## [2.3.4-dev] - 2026-11-05
 
 ### Añadido
 - Búsqueda en Facebook Marketplace (`SearchMarketplace`) con GraphQL `doc_id: 7111939778879383`, soporte de coordenadas, radio, filtros de precio y paginación por cursor (referencia `docs/research/facebook-marketplace-mcp`).
@@ -28,6 +28,14 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 - Migración de `docs/facebook-research/` a `docs/research/` cumpliendo la regla de `AGENTS.md` (línea 138).
 - Corrección de la extracción de contactos y participantes en LightSpeed parser (`pkg/core/lightspeed/parser.go`) para `verifyContactRowExists`, `updateOrInsertThread` y `deleteThenInsertThread`.
 - Normalización del parámetro de cuenta activa `av` en `pkg/features/thread/batch_data.go`.
+
+### Corregido
+- Normalización de adjuntos históricos GraphQL (`MessageImage`, video, audio, archivo, GIF, sticker y adjunto extensible) a campos canónicos consumibles por SocialManager, evitando burbujas `recovering` cuando Facebook sí expone multimedia real.
+- Contrato canónico de webhooks con nombres `message.*` y `session.status`, conservando aliases legacy únicamente en el borde de configuración.
+- Restauración idempotente de listeners MQTT para sesiones activas después de reiniciar `fbreego`.
+- Entrega al origen interno administrado de SocialManager mediante una allowlist exacta de destinos, sin desactivar la protección SSRF para otros hosts o puertos.
+- Outbox de webhooks cifrado con AES-GCM, recuperación posterior a reinicios, reintentos exponenciales y métricas de pendientes persistentes.
+- Observabilidad de entregas fallidas y compatibilidad del dispatcher con el callback local configurado por SocialManager.
 
 ### Fuentes de Investigación Consultadas y Registradas
 - `docs/research/mautrix-meta` (última consulta: 2026-11-04)

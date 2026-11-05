@@ -106,7 +106,7 @@ func (s *Server) handleSendTextMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.recordSessionActivity(sessionID)
-	s.EventHub.Publish(map[string]any{"event": "message_sent", "sessionId": sessionID, "tenantId": rec.TenantID, "result": res})
+	s.EventHub.Publish(map[string]any{"event": "message.sent", "sessionId": sessionID, "tenantId": rec.TenantID, "result": res})
 	JSONSuccess(w, "Message sent successfully.", res, http.StatusOK)
 }
 
@@ -146,7 +146,7 @@ func (s *Server) handleReactMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.recordSessionActivity(sessionID)
-	s.EventHub.Publish(map[string]any{"event": "reaction_updated", "sessionId": sessionID, "tenantId": rec.TenantID, "messageId": input.MessageID, "action": input.Action})
+	s.EventHub.Publish(map[string]any{"event": "message.reaction", "sessionId": sessionID, "tenantId": rec.TenantID, "messageId": input.MessageID, "action": input.Action})
 	JSONSuccess(w, "Reaction applied successfully.", res, http.StatusOK)
 }
 
@@ -186,7 +186,7 @@ func (s *Server) handleUnsendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.recordSessionActivity(sessionID)
-	s.EventHub.Publish(map[string]any{"event": "message_unsent", "sessionId": sessionID, "tenantId": rec.TenantID, "messageId": input.MessageID})
+	s.EventHub.Publish(map[string]any{"event": "message.deleted", "sessionId": sessionID, "tenantId": rec.TenantID, "messageId": input.MessageID})
 	JSONSuccess(w, "Message unsend executed successfully.", res, http.StatusOK)
 }
 
@@ -267,7 +267,7 @@ func (s *Server) handleSendMediaMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.recordSessionActivity(sessionID)
-	s.EventHub.Publish(map[string]any{"event": "message_sent", "sessionId": sessionID, "tenantId": rec.TenantID, "result": res, "attachments": uploadedResults})
+	s.EventHub.Publish(map[string]any{"event": "message.sent", "sessionId": sessionID, "tenantId": rec.TenantID, "result": res, "attachments": uploadedResults})
 	JSONSuccess(w, "Media message sent successfully.", map[string]any{
 		"result":      res,
 		"attachments": uploadedResults,

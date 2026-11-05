@@ -49,7 +49,7 @@ Variables relevantes:
 | Variable | Predeterminado | Uso |
 |---|---:|---|
 | `FBREEGO_PORT` | `8000` | Puerto HTTP; también se puede usar `--port`. |
-| `FBREEGO_SESSIONS_DIR` | `.fbreego_sessions` | Sesiones y configuración de webhook cifradas. |
+| `FBREEGO_SESSIONS_DIR` | `.fbreego_sessions` | Sesiones, configuración de webhook y outbox de entrega cifrados. |
 | `FBREEGO_MEDIA_DIR` | `.fbreego_media` | Archivos multimedia temporales. |
 | `FBREEGO_SESSION_SECRET` | sin valor | Obligatoria, mínimo 32 caracteres. |
 | `FBREEGO_API_AUTH_REQUIRED` | `true` | Solo use `false` explícitamente en desarrollo local. |
@@ -59,6 +59,7 @@ Variables relevantes:
 | `FBREEGO_API_WS_ORIGINS` | sin orígenes | Patrones de origen WebSocket separados por comas. |
 | `FBREEGO_TRAFFIC_ENABLED` | `false` | Activa el inspector de tráfico con vistas previas acotadas y redactadas. |
 | `FBREEGO_ENABLE_E2E_TEST_ENDPOINT` | `false` | Expone la suite operativa `/api/v1/tests/e2e`; solo para entornos aislados. |
+| `FBREEGO_WEBHOOK_ALLOWED_TARGETS` | sin valor | Orígenes administrados exactos, separados por comas, que pueden recibir webhooks aun si usan red privada o puerto no estándar. SocialManager lo configura con su propio `MAIN_SERVICE_URL`; los demás destinos continúan bajo la política anti-SSRF. |
 
 El proceso se niega a inicializar el almacenamiento persistente si falta `FBREEGO_SESSION_SECRET`. Los identificadores `tenantId` están restringidos a un segmento seguro de 1–64 caracteres.
 
@@ -102,7 +103,9 @@ Los webhooks se administran con:
 - `GET`, `PUT` y `DELETE /api/v1/webhook`;
 - `POST /api/v1/webhook/test`.
 
-Los destinos se limitan a HTTP/HTTPS públicos en sus puertos estándar (80/443). Se bloquean IPs privadas, loopback, link-local, metadatos cloud, redirecciones inseguras y DNS que resuelva a redes internas. Si se configura un secreto, cada entrega incluye `X-Hub-Signature-256`.
+Los destinos se limitan a HTTP/HTTPS públicos en sus puertos estándar (80/443). Una instalación administrada puede autorizar orígenes internos mediante `FBREEGO_WEBHOOK_ALLOWED_TARGETS`; cada entrada debe coincidir exactamente en esquema, host y puerto. Los demás destinos privados, loopback, link-local, metadatos cloud, redirecciones inseguras y DNS internos permanecen bloqueados. Si se configura un secreto, cada entrega incluye `X-Hub-Signature-256`.
+
+Los eventos se normalizan al contrato con puntos (`message.received`, `message.sent`, `message.edited`, `message.deleted`, `message.reaction` y `session.status`). Antes de entrar en la cola asíncrona, cada entrega se persiste cifrada en `webhook_outbox.enc`; los trabajos pendientes sobreviven reinicios y se reintentan con backoff exponencial. Al iniciar, el servicio también restaura de forma idempotente los listeners MQTT de las sesiones persistidas activas.
 
 ## Seguridad operativa
 

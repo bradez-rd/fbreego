@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -151,13 +152,36 @@ func parseGraphQLMessageNode(node map[string]any, defaultThreadID, ownFacebookID
 		timestamp = int64(tsNum)
 	}
 
-	var attachments []map[string]any
-	if blobAtts, ok := node["blob_attachments"].([]any); ok {
-		for _, a := range blobAtts {
-			if attMap, ok := a.(map[string]any); ok {
-				attachments = append(attachments, attMap)
+	attachments := make([]map[string]any, 0)
+	if sticker, ok := node["sticker"].(map[string]any); ok {
+		if normalized := normalizeGraphQLSticker(sticker); normalized != nil {
+			attachments = append(attachments, normalized)
+		}
+	}
+	if len(attachments) == 0 {
+		if blobAtts, ok := node["blob_attachments"].([]any); ok {
+			for _, a := range blobAtts {
+				if attMap, ok := a.(map[string]any); ok {
+					if normalized := normalizeGraphQLBlobAttachment(attMap); normalized != nil {
+						attachments = append(attachments, normalized)
+					}
+				}
 			}
 		}
+	}
+	if len(attachments) == 0 {
+		if extensible, ok := node["extensible_attachment"].(map[string]any); ok {
+			if normalized := normalizeGraphQLExtensibleAttachment(extensible); normalized != nil {
+				attachments = append(attachments, normalized)
+			}
+		}
+	}
+	if text == "" && len(attachments) > 0 && stringField(attachments[0], "type") == "link" {
+		text = firstString(
+			stringField(attachments[0], "title"),
+			stringField(attachments[0], "description"),
+			stringField(attachments[0], "url"),
+		)
 	}
 
 	isFromMe := senderID != "" && senderID == ownFacebookID
@@ -171,4 +195,156 @@ func parseGraphQLMessageNode(node map[string]any, defaultThreadID, ownFacebookID
 		Attachments: attachments,
 		IsFromMe:    isFromMe,
 	}
+}
+
+func normalizeGraphQLBlobAttachment(source map[string]any) map[string]any {
+	typename := stringField(source, "__typename")
+	filename := stringField(source, "filename")
+	extension := strings.TrimPrefix(stringField(source, "original_extension"), ".")
+	result := map[string]any{
+		"id": stringField(source, "legacy_attachment_id", "message_file_fbid", "url_shimhash"),
+	}
+
+	switch typename {
+	case "MessageImage":
+		result["type"] = "image"
+		result["url"] = firstString(nestedString(source, "large_preview", "uri"), nestedString(source, "preview", "uri"), nestedString(source, "thumbnail", "uri"))
+		result["thumbnailUrl"] = firstString(nestedString(source, "thumbnail", "uri"), nestedString(source, "preview", "uri"))
+		result["mimeType"] = imageMimeType(extension)
+		filename = ensureExtension(filename, extension)
+	case "MessageAnimatedImage":
+		result["type"] = "image"
+		result["url"] = nestedString(source, "animated_image", "uri")
+		result["thumbnailUrl"] = nestedString(source, "preview_image", "uri")
+		result["mimeType"] = "image/gif"
+		filename = ensureExtension(filename, "gif")
+	case "MessageVideo":
+		result["type"] = "video"
+		result["url"] = stringField(source, "playable_url")
+		result["thumbnailUrl"] = nestedString(source, "large_image", "uri")
+		result["mimeType"] = "video/mp4"
+		result["durationMs"] = source["playable_duration_in_ms"]
+	case "MessageAudio":
+		result["type"] = "audio"
+		result["url"] = stringField(source, "playable_url")
+		result["mimeType"] = "audio/mpeg"
+		result["durationMs"] = source["playable_duration_in_ms"]
+	case "MessageFile":
+		result["type"] = "document"
+		result["url"] = stringField(source, "url")
+		result["mimeType"] = stringField(source, "content_type")
+	default:
+		return nil
+	}
+
+	if filename != "" {
+		result["fileName"] = filename
+	}
+	if stringField(result, "url") == "" {
+		return nil
+	}
+	return compactAttachment(result)
+}
+
+func normalizeGraphQLSticker(source map[string]any) map[string]any {
+	url := firstString(stringField(source, "url"), stringField(source, "sprite_image_2x"), stringField(source, "sprite_image"))
+	if url == "" {
+		return nil
+	}
+	return compactAttachment(map[string]any{
+		"type":         "sticker",
+		"id":           stringField(source, "id"),
+		"url":          url,
+		"thumbnailUrl": firstString(stringField(source, "sprite_image"), url),
+		"mimeType":     "image/webp",
+		"fileName":     "sticker.webp",
+	})
+}
+
+func normalizeGraphQLExtensibleAttachment(source map[string]any) map[string]any {
+	story, ok := source["story_attachment"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	media, _ := story["media"].(map[string]any)
+	imageURL := firstString(nestedString(media, "animated_image", "uri"), nestedString(media, "image", "uri"))
+	url := stringField(story, "url")
+	if url == "" && imageURL == "" {
+		return nil
+	}
+	return compactAttachment(map[string]any{
+		"type":         "link",
+		"id":           stringField(source, "legacy_attachment_id"),
+		"url":          url,
+		"title":        nestedString(story, "title_with_entities", "text"),
+		"description":  nestedString(story, "description", "text"),
+		"thumbnailUrl": imageURL,
+	})
+}
+
+func stringField(source map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := source[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nestedString(source map[string]any, objectKey, valueKey string) string {
+	if source == nil {
+		return ""
+	}
+	nested, ok := source[objectKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return stringField(nested, valueKey)
+}
+
+func firstString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func ensureExtension(filename, extension string) string {
+	extension = strings.TrimPrefix(strings.TrimSpace(extension), ".")
+	if filename == "" || extension == "" || filepath.Ext(filename) != "" {
+		return filename
+	}
+	return filename + "." + extension
+}
+
+func imageMimeType(extension string) string {
+	switch strings.ToLower(strings.TrimPrefix(extension, ".")) {
+	case "png":
+		return "image/png"
+	case "webp":
+		return "image/webp"
+	case "gif":
+		return "image/gif"
+	default:
+		return "image/jpeg"
+	}
+}
+
+func compactAttachment(source map[string]any) map[string]any {
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				result[key] = typed
+			}
+		case nil:
+			continue
+		default:
+			result[key] = value
+		}
+	}
+	return result
 }

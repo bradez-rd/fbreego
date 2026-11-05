@@ -74,8 +74,8 @@ func TestRealtimeHubPublishesToDispatcher(t *testing.T) {
 	dispatcher := &recordingDispatcher{}
 	hub.SetDispatcher(dispatcher)
 	hub.EmitSessionStatus("sess_1", "active", "")
-	if dispatcher.eventName != "session_status" {
-		t.Fatalf("expected session_status dispatch, got %q", dispatcher.eventName)
+	if dispatcher.eventName != "session.status" {
+		t.Fatalf("expected session.status dispatch, got %q", dispatcher.eventName)
 	}
 	if dispatcher.payload["sessionId"] != "sess_1" {
 		t.Fatalf("unexpected payload: %v", dispatcher.payload)

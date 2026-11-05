@@ -6,6 +6,7 @@ import (
 )
 
 func TestIsSSRFRisk(t *testing.T) {
+	t.Setenv("FBREEGO_WEBHOOK_ALLOWED_TARGETS", "")
 	tests := []struct {
 		url      string
 		wantRisk bool
@@ -34,7 +35,28 @@ func TestIsSSRFRisk(t *testing.T) {
 	}
 }
 
+func TestExplicitWebhookAllowlistAcceptsOnlyExactManagedOrigin(t *testing.T) {
+	t.Setenv("FBREEGO_WEBHOOK_ALLOWED_TARGETS", "http://127.0.0.1:4000,http://backend:4000")
+
+	if IsSSRFRisk("http://127.0.0.1:4000/api/social/webhooks/providers/provider-1") {
+		t.Fatal("expected exact SocialManager origin to be allowed")
+	}
+	if IsSSRFRisk("http://backend:4000/api/social/webhooks/providers/provider-1") {
+		t.Fatal("expected exact Docker service origin to be allowed")
+	}
+	for _, target := range []string{
+		"http://127.0.0.1:4001/api/social/webhooks/providers/provider-1",
+		"http://localhost:4000/api/social/webhooks/providers/provider-1",
+		"http://user:password@127.0.0.1:4000/api/social/webhooks/providers/provider-1",
+	} {
+		if !IsSSRFRisk(target) {
+			t.Fatalf("expected non-allowlisted target to remain blocked: %s", target)
+		}
+	}
+}
+
 func TestSafeDialRejectsPrivateAddress(t *testing.T) {
+	t.Setenv("FBREEGO_WEBHOOK_ALLOWED_TARGETS", "")
 	if _, err := safeDialContext(context.Background(), "tcp", "127.0.0.1:8080"); err == nil {
 		t.Fatal("expected private dial target to be rejected")
 	}

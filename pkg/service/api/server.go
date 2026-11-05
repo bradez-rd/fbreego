@@ -19,7 +19,7 @@ import (
 
 const (
 	ServiceName            = "fbreego"
-	Version                = "2.3.3"
+	Version                = "2.3.4-dev"
 	WebSocketTicketTTLSecs = 30
 )
 
@@ -280,4 +280,3 @@ func extractTenantID(r *http.Request) string {
 	}
 	return tenant
 }
-

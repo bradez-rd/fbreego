@@ -162,8 +162,8 @@ func (h *RealtimeHub) Publish(event map[string]any) {
 // EmitSessionStatus emite una actualización de estado de una sesión.
 func (h *RealtimeHub) EmitSessionStatus(sessionID, status, errorMessage string) {
 	evt := map[string]any{
-		"event":     "session_status",
-		"type":      "session_status",
+		"event":     "session.status",
+		"type":      "session.status",
 		"sessionId": sessionID,
 		"status":    status,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),

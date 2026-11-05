@@ -8,31 +8,33 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 )
 
 var privateCIDRs []*net.IPNet
 
 func init() {
 	cidrs := []string{
-		"127.0.0.0/8",    // IPv4 loopback
-		"::1/128",        // IPv6 loopback
-		"10.0.0.0/8",     // RFC1918 privado
-		"172.16.0.0/12",  // RFC1918 privado
-		"192.168.0.0/16", // RFC1918 privado
-		"169.254.0.0/16", // IPv4 Link-local y metadatos cloud (169.254.169.254)
-		"fe80::/10",      // IPv6 Link-local
-		"fc00::/7",       // IPv6 Unique local
-		"0.0.0.0/8",      // Red local
-		"224.0.0.0/4",    // Multicast
-		"240.0.0.0/4",    // Reservado
-		"100.64.0.0/10",  // Shared address space / CGNAT
-		"192.0.0.0/24",   // IETF protocol assignments
-		"192.0.2.0/24",   // Documentation
-		"198.18.0.0/15",  // Benchmarking
+		"127.0.0.0/8",     // IPv4 loopback
+		"::1/128",         // IPv6 loopback
+		"10.0.0.0/8",      // RFC1918 privado
+		"172.16.0.0/12",   // RFC1918 privado
+		"192.168.0.0/16",  // RFC1918 privado
+		"169.254.0.0/16",  // IPv4 Link-local y metadatos cloud (169.254.169.254)
+		"fe80::/10",       // IPv6 Link-local
+		"fc00::/7",        // IPv6 Unique local
+		"0.0.0.0/8",       // Red local
+		"224.0.0.0/4",     // Multicast
+		"240.0.0.0/4",     // Reservado
+		"100.64.0.0/10",   // Shared address space / CGNAT
+		"192.0.0.0/24",    // IETF protocol assignments
+		"192.0.2.0/24",    // Documentation
+		"198.18.0.0/15",   // Benchmarking
 		"198.51.100.0/24", // Documentation
-		"203.0.113.0/24", // Documentation
-		"ff00::/8",       // IPv6 multicast
-		"2001:db8::/32",  // IPv6 documentation
+		"203.0.113.0/24",  // Documentation
+		"ff00::/8",        // IPv6 multicast
+		"2001:db8::/32",   // IPv6 documentation
 	}
 
 	for _, cidr := range cidrs {
@@ -43,6 +45,69 @@ func init() {
 	}
 }
 
+type webhookOrigin struct {
+	scheme string
+	host   string
+	port   string
+}
+
+func parseWebhookOrigin(raw string) (webhookOrigin, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return webhookOrigin{}, false
+	}
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return webhookOrigin{
+		scheme: strings.ToLower(u.Scheme),
+		host:   strings.ToLower(strings.Trim(u.Hostname(), "[]")),
+		port:   port,
+	}, true
+}
+
+func allowedWebhookOrigins() []webhookOrigin {
+	configured := coreconfig.Value("FBREEGO_WEBHOOK_ALLOWED_TARGETS")
+	if strings.TrimSpace(configured) == "" {
+		return nil
+	}
+	origins := make([]webhookOrigin, 0)
+	for _, raw := range strings.Split(configured, ",") {
+		if origin, ok := parseWebhookOrigin(raw); ok {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
+}
+
+func isExplicitlyAllowedTarget(targetURL string) bool {
+	target, ok := parseWebhookOrigin(targetURL)
+	if !ok {
+		return false
+	}
+	for _, allowed := range allowedWebhookOrigins() {
+		if target == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func isExplicitlyAllowedAddress(host, port string) bool {
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	for _, allowed := range allowedWebhookOrigins() {
+		if allowed.host == host && allowed.port == port {
+			return true
+		}
+	}
+	return false
+}
+
 // IsSSRFRisk valida si una dirección URL o nombre de host apunta a una red interna, privada o servicio de metadatos.
 func IsSSRFRisk(targetURL string) bool {
 	u, err := url.Parse(targetURL)
@@ -51,6 +116,12 @@ func IsSSRFRisk(targetURL string) bool {
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return true
+	}
+	if u.User != nil {
+		return true
+	}
+	if isExplicitlyAllowedTarget(targetURL) {
+		return false
 	}
 	if port := u.Port(); port != "" && ((u.Scheme == "http" && port != "80") || (u.Scheme == "https" && port != "443")) {
 		return true
@@ -117,6 +188,10 @@ func safeDialContext(ctx context.Context, network, address string) (net.Conn, er
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, fmt.Errorf("dirección de webhook inválida: %w", err)
+	}
+	if isExplicitlyAllowedAddress(host, port) {
+		dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
 	}
 	resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil || len(resolved) == 0 {

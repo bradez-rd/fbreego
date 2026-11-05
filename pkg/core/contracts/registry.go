@@ -33,10 +33,13 @@ const (
 	DefaultDocIDFeedStoryArchive    = "5129402940471201"
 	DefaultDocIDPrivacyBlockUser    = "3829104820491023"
 	DefaultDocIDSyncSequence        = "1349387578499440"
-	DefaultDocIDMarketplaceSearch   = "7111939778879383"
-	DefaultDocIDMarketplaceCreate   = "5033081016747999"
-	DefaultDocIDMarketplaceDetail   = "6720440741405337"
-	DefaultVersionIDEditMessage     = "7191105584282302"
+	DefaultDocIDMarketplaceSearch         = "7111939778879383"
+	DefaultDocIDMarketplaceCreate         = "9551550371629242"
+	DefaultDocIDMarketplaceDetail         = "6720440741405337"
+	DefaultDocIDMarketplaceComposerCreate = "27371559272471818"
+	DefaultDocIDMarketplaceAttributes     = "24482075174793922"
+	DefaultDocIDMarketplaceDelete         = "30073389588942699"
+	DefaultVersionIDEditMessage           = "7191105584282302"
 )
 
 // OperationContract encapsula los metadatos de un contrato de endpoint/operación privada de Facebook.
@@ -156,6 +159,24 @@ func NewRegistry() *Registry {
 		DocID:        DefaultDocIDMarketplaceDetail,
 		Endpoint:     DefaultGraphQLURL,
 		Description:  "Consulta GraphQL para obtener detalle de un artículo en Facebook Marketplace",
+	}
+	r.operations["MarketplaceComposerCreateQuery"] = OperationContract{
+		FriendlyName: "CometMarketplaceComposerCreateComponentQuery",
+		DocID:        DefaultDocIDMarketplaceComposerCreate,
+		Endpoint:     DefaultGraphQLURL,
+		Description:  "Consulta GraphQL para obtener configuración inicial del composer y marketplace regional",
+	}
+	r.operations["MarketplaceAttributesQuery"] = OperationContract{
+		FriendlyName: "useMarketplaceComposerAttributesQuery",
+		DocID:        DefaultDocIDMarketplaceAttributes,
+		Endpoint:     DefaultGraphQLURL,
+		Description:  "Consulta GraphQL para obtener atributos normalizados de categorías de Marketplace",
+	}
+	r.operations["MarketplaceDeleteMutation"] = OperationContract{
+		FriendlyName: "useCometMarketplaceForSaleItemDeleteMutation",
+		DocID:        DefaultDocIDMarketplaceDelete,
+		Endpoint:     DefaultGraphQLURL,
+		Description:  "Mutación GraphQL para eliminar un artículo en Facebook Marketplace",
 	}
 
 	return r

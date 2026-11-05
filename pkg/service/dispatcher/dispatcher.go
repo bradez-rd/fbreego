@@ -14,20 +14,27 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bradez-rd/fbreego/pkg/core/logger"
 	"github.com/bradez-rd/fbreego/pkg/service/webhook"
 )
 
+const webhookRecoveryInterval = 5 * time.Second
+
 // WebhookTask representa una entrega pendiente en la cola asíncrona de webhooks.
 type WebhookTask struct {
+	JobID     string
 	EventName string
 	Payload   map[string]any
+	Attempts  int
 }
 
-// Dispatcher gestiona la cola en memoria, reintentos y entrega de eventos hacia servidores externos.
+// Dispatcher gestiona el outbox cifrado, reintentos y entrega de eventos hacia servidores externos.
 type Dispatcher struct {
 	store          *webhook.WebhookConfigStore
+	outbox         *webhook.WebhookOutboxStore
 	client         *http.Client
 	queue          chan WebhookTask
+	queued         sync.Map
 	mu             sync.Mutex
 	running        bool
 	cancel         context.CancelFunc
@@ -39,9 +46,18 @@ type Dispatcher struct {
 func NewDispatcher(store *webhook.WebhookConfigStore) *Dispatcher {
 	return &Dispatcher{
 		store:  store,
+		outbox: webhook.NewWebhookOutboxStore(store.StateDir()),
 		client: newSafeHTTPClient(),
 		queue:  make(chan WebhookTask, 256),
 	}
+}
+
+// Ready reporta si el outbox cifrado pudo inicializarse y recuperarse.
+func (d *Dispatcher) Ready() error {
+	if d == nil || d.outbox == nil {
+		return fmt.Errorf("outbox de webhook no configurado")
+	}
+	return d.outbox.Ready()
 }
 
 // Start inicia el worker pool del despachador en background.
@@ -57,6 +73,7 @@ func (d *Dispatcher) Start(ctx context.Context) {
 	d.mu.Unlock()
 
 	go d.workerLoop(workerCtx)
+	go d.recoveryLoop(workerCtx)
 }
 
 // Stop detiene ordenadamente el procesamiento de la cola de webhooks.
@@ -72,15 +89,19 @@ func (d *Dispatcher) Stop() {
 	d.running = false
 }
 
-// Enqueue añade un evento a la cola de despacho asíncrona.
+// Enqueue persiste un evento antes de programar su entrega asíncrona.
 func (d *Dispatcher) Enqueue(eventName string, payload map[string]any) bool {
-	select {
-	case d.queue <- WebhookTask{EventName: eventName, Payload: payload}:
-		return true
-	default:
+	if canonical, valid := webhook.CanonicalEventName(eventName); valid {
+		eventName = canonical
+	}
+	job, err := d.outbox.Add(eventName, payload)
+	if err != nil {
 		d.totalFailed.Add(1)
+		logger.Error("No se pudo persistir evento webhook %s: %v", eventName, err)
 		return false
 	}
+	d.schedule(job)
+	return true
 }
 
 func (d *Dispatcher) workerLoop(ctx context.Context) {
@@ -89,15 +110,78 @@ func (d *Dispatcher) workerLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-d.queue:
-			_ = d.deliverWithRetry(ctx, task.EventName, task.Payload)
+			err := d.deliverWithRetry(ctx, task.EventName, task.Payload)
+			if err == nil {
+				if deleteErr := d.outbox.Delete(task.JobID); deleteErr != nil {
+					logger.Error("No se pudo confirmar entrega webhook %s: %v", task.JobID, deleteErr)
+				}
+			} else {
+				nextAttempt := time.Now().Add(webhookRetryDelay(task.Attempts))
+				if persistErr := d.outbox.MarkFailed(task.JobID, err, nextAttempt); persistErr != nil {
+					logger.Error("No se pudo reprogramar entrega webhook %s: %v", task.JobID, persistErr)
+				} else {
+					logger.Error("Entrega webhook %s falló; próximo intento en %s: %v", task.JobID, nextAttempt.UTC().Format(time.RFC3339), err)
+				}
+			}
+			d.queued.Delete(task.JobID)
 		}
 	}
+}
+
+func (d *Dispatcher) recoveryLoop(ctx context.Context) {
+	d.scheduleDue()
+	ticker := time.NewTicker(webhookRecoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.scheduleDue()
+		}
+	}
+}
+
+func (d *Dispatcher) scheduleDue() {
+	for _, job := range d.outbox.Due(time.Now()) {
+		d.schedule(job)
+	}
+}
+
+func (d *Dispatcher) schedule(job webhook.WebhookJob) {
+	if _, loaded := d.queued.LoadOrStore(job.ID, struct{}{}); loaded {
+		return
+	}
+	select {
+	case d.queue <- WebhookTask{
+		JobID:     job.ID,
+		EventName: job.EventName,
+		Payload:   job.Payload,
+		Attempts:  job.Attempts,
+	}:
+	default:
+		d.queued.Delete(job.ID)
+	}
+}
+
+func webhookRetryDelay(attempts int) time.Duration {
+	delay := 5 * time.Second
+	for attempt := 0; attempt < attempts && delay < 5*time.Minute; attempt++ {
+		delay *= 2
+	}
+	if delay > 5*time.Minute {
+		return 5 * time.Minute
+	}
+	return delay
 }
 
 func (d *Dispatcher) deliverWithRetry(ctx context.Context, eventName string, payload map[string]any) error {
 	cfg := d.store.Get()
 	if !cfg.Enabled || cfg.URL == "" {
 		return nil
+	}
+	if canonical, valid := webhook.CanonicalEventName(eventName); valid {
+		eventName = canonical
 	}
 
 	// Verificar si el evento está en la lista de eventos suscritos
@@ -241,9 +325,12 @@ func (d *Dispatcher) TestProbe(ctx context.Context, targetURL, secret string) (m
 
 // Stats devuelve métricas acumuladas del despachador.
 func (d *Dispatcher) Stats() map[string]any {
+	outboxReady := d.outbox != nil && d.outbox.Ready() == nil
 	return map[string]any{
-		"totalDelivered": d.totalDelivered.Load(),
-		"totalFailed":    d.totalFailed.Load(),
-		"queueDepth":     len(d.queue),
+		"totalDelivered":    d.totalDelivered.Load(),
+		"totalFailed":       d.totalFailed.Load(),
+		"queueDepth":        len(d.queue),
+		"persistentPending": d.outbox.Count(),
+		"outboxReady":       outboxReady,
 	}
 }

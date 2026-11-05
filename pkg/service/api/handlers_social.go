@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -191,11 +192,18 @@ func (s *Server) handleCreateMarketplaceItem(w http.ResponseWriter, r *http.Requ
 					if info != nil && info.FileName != "" {
 						fileName = info.FileName
 					}
-					uploaded, upErr := attachments.Upload(r.Context(), s.httpClient, rec.ProviderData, fileName, f, false)
-					_ = f.Close()
-					if upErr == nil && uploaded != nil && uploaded.AttachmentID != "" {
-						input.ImageIDs = append(input.ImageIDs, uploaded.AttachmentID)
+					uploaded, upErr := social.UploadComposerPhoto(r.Context(), s.httpClient, rec.ProviderData, input.MarketplaceID, fileName, f)
+					if upErr == nil && uploaded != nil && uploaded.PhotoID != "" {
+						input.ImageIDs = append(input.ImageIDs, uploaded.PhotoID)
+					} else {
+						// Fallback de contingencia a upload de attachments estándar
+						_, _ = f.Seek(0, io.SeekStart)
+						legacyUp, legErr := attachments.Upload(r.Context(), s.httpClient, rec.ProviderData, fileName, f, false)
+						if legErr == nil && legacyUp != nil && legacyUp.AttachmentID != "" {
+							input.ImageIDs = append(input.ImageIDs, legacyUp.AttachmentID)
+						}
 					}
+					_ = f.Close()
 				}
 			}
 		}
@@ -207,6 +215,66 @@ func (s *Server) handleCreateMarketplaceItem(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if dataMap, ok := res["data"].(map[string]any); ok {
+		if dataMap["marketplace_listing_create"] == nil {
+			errMsg := "Facebook rechazó la publicación en Marketplace."
+			if errs, ok := res["errors"].([]any); ok && len(errs) > 0 {
+				if firstErr, ok := errs[0].(map[string]any); ok {
+					if msg, ok := firstErr["message"].(string); ok && msg != "" {
+						errMsg = fmt.Sprintf("Facebook Marketplace error: %s", msg)
+					}
+				}
+			}
+			JSONError(w, "MARKETPLACE_REJECTED", errMsg, http.StatusUnprocessableEntity, res, "")
+			return
+		}
+	}
+
 	s.RecordAudit("marketplace_publish", fmt.Sprintf("Marketplace listing created for session %s: %s", sessionID, input.Title), sessionID)
 	JSONSuccess(w, "Marketplace listing created successfully.", res, http.StatusCreated)
+}
+
+func (s *Server) handleDeleteMarketplaceItem(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	itemID := chi.URLParam(r, "itemId")
+	rec, err := s.Registry.Get(sessionID)
+	if err != nil {
+		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
+		return
+	}
+	if rec.ProviderData == nil {
+		JSONError(w, "SESSION_NOT_VALIDATED", "Session does not have active provider data.", http.StatusBadRequest, nil, "")
+		return
+	}
+	if strings.TrimSpace(itemID) == "" {
+		JSONError(w, "VALIDATION_FAILED", "itemId is required.", http.StatusBadRequest, nil, "")
+		return
+	}
+
+	res, err := social.DeleteMarketplaceItem(r.Context(), s.httpClient, rec.ProviderData, itemID)
+	if err != nil {
+		JSONError(w, "MARKETPLACE_DELETE_FAILED", err.Error(), http.StatusInternalServerError, nil, "")
+		return
+	}
+
+	if dataMap, ok := res["data"].(map[string]any); ok {
+		if dataMap["commerce_for_sale_item_delete"] == nil {
+			errMsg := "Facebook rechazó la eliminación en Marketplace."
+			if errs, ok := res["errors"].([]any); ok && len(errs) > 0 {
+				if firstErr, ok := errs[0].(map[string]any); ok {
+					if msg, ok := firstErr["message"].(string); ok && msg != "" {
+						errMsg = fmt.Sprintf("Facebook Marketplace delete error: %s", msg)
+					}
+				}
+			}
+			JSONError(w, "MARKETPLACE_DELETE_REJECTED", errMsg, http.StatusUnprocessableEntity, res, "")
+			return
+		}
+	}
+
+	s.RecordAudit("marketplace_delete", fmt.Sprintf("Marketplace listing deleted for session %s: %s", sessionID, itemID), sessionID)
+	JSONSuccess(w, "Marketplace item deleted successfully.", map[string]any{
+		"itemId": itemID,
+		"raw":    res,
+	}, http.StatusOK)
 }

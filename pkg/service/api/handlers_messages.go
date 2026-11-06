@@ -41,7 +41,8 @@ func (s *Server) handleOperationError(w http.ResponseWriter, sessionID string, r
 		JSONError(w, "RATE_LIMITED", "Request was rate-limited by Facebook.", http.StatusTooManyRequests, nil, "")
 		return
 	}
-	JSONError(w, defaultCode, defaultMsg, http.StatusInternalServerError, nil, "")
+	details := map[string]any{"reason": err.Error()}
+	JSONError(w, defaultCode, defaultMsg, http.StatusInternalServerError, details, "")
 }
 
 func (s *Server) handleSendTextMessage(w http.ResponseWriter, r *http.Request) {

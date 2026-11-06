@@ -3,10 +3,16 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	coreauth "github.com/bradez-rd/fbreego/pkg/core/auth"
 )
 
 // OpenAPISchema describes every stable HTTP capability exposed by Routes.
 func OpenAPISchema() map[string]any {
+	credentialLogin := unavailableOperation("Credential login is disabled by policy F-03; import cookies instead")
+	if coreauth.FB4ALoginEnabled() {
+		credentialLogin = operation("Authenticate via explicitly enabled FB4A credentials")
+	}
 	paths := map[string]any{
 		"/healthz":                              pathOps("get", publicOperation("Healthcheck endpoint")),
 		"/readyz":                               pathOps("get", publicOperation("Readiness endpoint")),
@@ -19,13 +25,13 @@ func OpenAPISchema() map[string]any {
 		"/api/v1/diagnostics":                   pathOps("get", operation("Runtime diagnostics")),
 		"/api/v1/websocket-ticket":              pathOps("post", operation("Issue a one-time WebSocket ticket")),
 		"/api/v1/sessions":                      pathOps("get", operation("List managed sessions"), "post", operation("Create and validate a session")),
-		"/api/v1/sessions/login":                pathOps("post", operation("Authenticate via credentials and create session")),
-		"/api/v1/sessions/auth/credentials":     pathOps("post", operation("Authenticate via credentials (fbreego/SocialManager)")),
-		"/api/v1/sessions/auth/2fa":             pathOps("post", operation("Complete 2FA verification challenge")),
+		"/api/v1/sessions/login":                pathOps("post", credentialLogin),
+		"/api/v1/sessions/auth/credentials":     pathOps("post", credentialLogin),
+		"/api/v1/sessions/auth/2fa":             pathOps("post", credentialLogin),
 		"/api/v1/sessions/{sessionId}":          pathOps("delete", operation("Delete a session")),
 		"/api/v1/sessions/{sessionId}/status":   pathOps("get", operation("Get session status")),
 		"/api/v1/sessions/{sessionId}/validate": pathOps("post", operation("Revalidate a session")),
-		"/api/v1/auth/login":                    pathOps("post", operation("Authenticate directly via FB4A credentials")),
+		"/api/v1/auth/login":                    pathOps("post", credentialLogin),
 		"/api/v1/auth/totp/generate":            pathOps("post", operation("Generate current RFC 6238 TOTP code")),
 		"/api/v1/sessions/{sessionId}/listen/start":                 pathOps("post", operation("Start Messenger realtime listener")),
 		"/api/v1/sessions/{sessionId}/listen/stop":                  pathOps("post", operation("Stop session listener")),
@@ -44,7 +50,7 @@ func OpenAPISchema() map[string]any {
 		"/api/v1/sessions/{sessionId}/users/{userId}":               pathOps("get", operation("Get user information")),
 		"/api/v1/sessions/{sessionId}/search":                       pathOps("get", operation("Search users")),
 		"/api/v1/sessions/{sessionId}/privacy/block":                pathOps("post", operation("Block or unblock a user")),
-		"/api/v1/sessions/{sessionId}/marketplace/search":          pathOps("get", operation("Search Marketplace listings")),
+		"/api/v1/sessions/{sessionId}/marketplace/search":           pathOps("get", operation("Search Marketplace listings")),
 		"/api/v1/sessions/{sessionId}/marketplace/{itemId}":         pathOps("get", operation("Get Marketplace item"), "delete", operation("Delete Marketplace item")),
 		"/api/v1/sessions/{sessionId}/marketplace":                  pathOps("post", operation("Create Marketplace listing")),
 		"/api/v1/webhook":                             pathOps("get", operation("Get webhook configuration"), "put", operation("Update webhook configuration"), "delete", operation("Clear webhook configuration")),
@@ -105,6 +111,8 @@ func publicOperation(summary string) map[string]any {
 func unavailableOperation(summary string) map[string]any {
 	op := operation(summary)
 	op["responses"].(map[string]any)["501"] = map[string]any{"description": "Capability is not implemented"}
+	op["x-capability-status"] = "disabled"
+	op["x-error-code"] = "FB4A_LOGIN_DISABLED"
 	return op
 }
 

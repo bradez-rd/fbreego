@@ -93,13 +93,18 @@ func ExtractThreadItems(threadsData map[string]any) []map[string]any {
 		}
 		tk, _ := node["thread_key"].(map[string]any)
 		var tid string
+		var recipientID string
 		if tk != nil {
 			if v, ok := tk["thread_fbid"].(string); ok && v != "" {
 				tid = v
-			} else if v, ok := tk["other_user_id"].(string); ok && v != "" {
-				tid = v
+			}
+			if v, ok := tk["other_user_id"].(string); ok && v != "" {
+				recipientID = v
 			} else if v, ok := tk["other_user_id"].(float64); ok && v > 0 {
-				tid = fmt.Sprintf("%.0f", v)
+				recipientID = fmt.Sprintf("%.0f", v)
+			}
+			if tid == "" {
+				tid = recipientID
 			}
 		}
 		if tid == "" {
@@ -137,10 +142,6 @@ func ExtractThreadItems(threadsData map[string]any) []map[string]any {
 				}
 			}
 		}
-		if strings.TrimSpace(name) == "" && tid != "" {
-			name = "Chat " + tid
-		}
-
 		threadTypeStr, _ := node["thread_type"].(string)
 		threadType := "user"
 		isMarketplace := false
@@ -164,6 +165,8 @@ func ExtractThreadItems(threadsData map[string]any) []map[string]any {
 			"threadId":    tid,
 			"name":        name,
 			"type":        threadType,
+			"recipientId": recipientID,
+			"chatJid":     recipientID,
 			"unreadCount": unreadCount,
 			"updatedAt":   updatedAt,
 			"marketplace": isMarketplace,

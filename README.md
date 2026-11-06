@@ -20,8 +20,13 @@ Implementado y conectado:
 No disponible todavía:
 
 - backend criptográfico E2EE real.
+- login por usuario/contraseña mediante emulación FB4A; permanece deshabilitado por la política de seguridad F-03.
 
 La capacidad E2EE se reporta como no disponible y no devuelve éxitos simulados. El listener MQTT normaliza payloads realtime conocidos y publica `message.received`/`message.edited` hacia WebSocket y webhook; los cambios privados del protocolo de Meta pueden requerir adaptar nuevamente el decodificador.
+
+La creación de sesiones utiliza cookies importadas de una sesión real. `/api/v1/app/info` publica `auth.cookies` como soportado y `auth.credentials` con su estado efectivo. Las rutas FB4A se conservan por compatibilidad, pero cuando la capacidad está inactiva responden `501 FB4A_LOGIN_DISABLED` antes de realizar transporte hacia Facebook.
+
+El listado de conversaciones combina GraphQL batch y LightSpeed. Los tipos LightSpeed `2` y `16` son grupos; `15` es una conversación E2EE uno-a-uno y conserva tanto la clave operativa del hilo como el JID/destinatario resuelto por las tareas híbridas del proveedor.
 
 ## Requisitos y compilación
 

@@ -5,6 +5,21 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/
 
 ---
 
+## [2.3.5-dev] - 2026-11-06
+
+### Corregido
+- Clasificación de LightSpeed `threadType=15` como conversación E2EE uno-a-uno, conservando `threadType=2` como grupo y publicando el mapeo real entre la clave del hilo y el JID/destinatario.
+- Resolución de nombres de hilos híbridos desde contactos y participantes reales, sin generar títulos sintéticos basados en identificadores internos.
+- Combinación de los hilos GraphQL y LightSpeed para que la presencia de conversaciones Marketplace no suprima los hilos modernos.
+- Contrato explícito para FB4A deshabilitado: capacidades efectivas, OpenAPI y errores HTTP distinguen el bloqueo de política de un fallo de credenciales.
+
+### Fuentes de Investigación Consultadas
+- `https://github.com/mautrix/meta/blob/69a505d69039a24796ad5d24a599a548d315c300/pkg/messagix/table/enums.go` (consulta: 2026-11-06; commit: 2026-11-03): tipos `GROUP_THREAD=2` y `ENCRYPTED_OVER_WA_ONE_TO_ONE=15`.
+- `https://github.com/mautrix/meta/blob/69a505d69039a24796ad5d24a599a548d315c300/pkg/connector/handlemeta.go` (consulta: 2026-11-06; commit: 2026-11-03): persistencia del mapeo de hilos híbridos.
+- `https://github.com/gklka/Hermes/blob/edb0d6bc02019306ac6c3c094c1c009d37653dca/Core/meta.go` (consulta: 2026-11-06; commit: 2026-11-04): traslado de hilos E2EE uno-a-uno bajo el JID y resolución de participantes.
+
+---
+
 ## [2.3.4-dev] - 2026-11-05
 
 ### Añadido

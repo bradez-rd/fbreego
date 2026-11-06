@@ -30,6 +30,10 @@ type ThreadSummary struct {
 	ThreadID       string `json:"threadId"`
 	Name           string `json:"name"`
 	IsGroup        bool   `json:"isGroup"`
+	IsE2EE         bool   `json:"isE2EE"`
+	RecipientID    string `json:"recipientId,omitempty"`
+	ChatJID        string `json:"chatJid,omitempty"`
+	ThreadTypeCode int    `json:"threadTypeCode,omitempty"`
 	Snippet        string `json:"snippet"`
 	LastActivityTs int64  `json:"lastActivityTs"`
 	UnreadCount    int    `json:"unreadCount"`
@@ -106,6 +110,7 @@ func findLSRequests(node any, fn func(ls map[string]any)) {
 func ExtractLightSpeedThreadsAndContacts(html string) ([]ThreadSummary, map[string]ContactSummary) {
 	contacts := make(map[string]ContactSummary)
 	threads := make([]ThreadSummary, 0)
+	steps := make([]any, 0)
 
 	matches := genericScriptRegex.FindAllStringSubmatch(html, -1)
 	for _, m := range matches {
@@ -126,121 +131,167 @@ func ExtractLightSpeedThreadsAndContacts(html string) ([]ThreadSummary, map[stri
 			if err := json.Unmarshal([]byte(payloadStr), &payload); err != nil {
 				return
 			}
-			steps, _ := payload["step"].([]any)
+			requestSteps, _ := payload["step"].([]any)
+			steps = append(steps, requestSteps...)
+		})
+	}
 
-			// Paso 1: Extraer contactos desde verifyContactRowExists
-			for _, st := range steps {
-				extractLSCalls(st, func(name string, args []any) {
-					if name == "verifyContactRowExists" {
-						cleaned := make([]any, len(args))
-						for i, a := range args {
-							cleaned[i] = cleanLSArg(a)
-						}
-						if len(cleaned) >= 4 {
-							uid := safeLSString(cleaned[0])
-							cname := safeLSString(cleaned[3])
-							avatar := safeLSString(cleaned[2])
-							if uid != "" && cname != "" {
-								contacts[uid] = ContactSummary{
-									ID:     uid,
-									Name:   cname,
-									Avatar: avatar,
-								}
-							}
-						}
+	cleanArgs := func(args []any) []any {
+		cleaned := make([]any, len(args))
+		for i, arg := range args {
+			cleaned[i] = cleanLSArg(arg)
+		}
+		return cleaned
+	}
+
+	// Contacts and hybrid mappings must be known before materializing threads.
+	// LightSpeed may emit those rows before or after updateOrInsertThread.
+	hybridRecipientByThread := make(map[string]string)
+	participantsByThread := make(map[string][]string)
+	for _, step := range steps {
+		extractLSCalls(step, func(name string, args []any) {
+			cleaned := cleanArgs(args)
+			switch name {
+			case "verifyContactRowExists":
+				if len(cleaned) < 4 {
+					return
+				}
+				uid := safeLSString(cleaned[0])
+				contactName := safeLSString(cleaned[3])
+				if uid != "" && contactName != "" {
+					contacts[uid] = ContactSummary{ID: uid, Name: contactName, Avatar: safeLSString(cleaned[2])}
+				}
+			case "deleteThenInsertContact":
+				if len(cleaned) < 10 {
+					return
+				}
+				uid := safeLSString(cleaned[0])
+				contactName := safeLSString(cleaned[9])
+				avatar := safeLSString(cleaned[5])
+				if avatar == "" {
+					avatar = safeLSString(cleaned[2])
+				}
+				if uid != "" && contactName != "" {
+					contacts[uid] = ContactSummary{ID: uid, Name: contactName, Avatar: avatar}
+				}
+			case "verifyHybridThreadExists":
+				if len(cleaned) >= 2 {
+					threadKey := safeLSString(cleaned[0])
+					threadJID := safeLSString(cleaned[1])
+					if threadKey != "" && threadJID != "" {
+						hybridRecipientByThread[threadKey] = threadJID
 					}
-				})
+				}
+			case "updateThreadAuthorityAndMappingWithOTIDFromJID":
+				if len(cleaned) >= 2 {
+					threadJID := safeLSString(cleaned[0])
+					threadKey := safeLSString(cleaned[1])
+					if threadKey != "" && threadJID != "" {
+						hybridRecipientByThread[threadKey] = threadJID
+					}
+				}
+			case "addParticipantIdToGroupThread":
+				if len(cleaned) >= 2 {
+					threadKey := safeLSString(cleaned[0])
+					participantID := safeLSString(cleaned[1])
+					if threadKey != "" && participantID != "" {
+						participantsByThread[threadKey] = append(participantsByThread[threadKey], participantID)
+					}
+				}
+			}
+		})
+	}
+
+	for _, step := range steps {
+		extractLSCalls(step, func(name string, args []any) {
+			if name != "updateOrInsertThread" && name != "deleteThenInsertThread" {
+				return
+			}
+			cleaned := cleanArgs(args)
+			if len(cleaned) <= 10 {
+				return
 			}
 
-			// Paso 2: Extraer hilos desde updateOrInsertThread o deleteThenInsertThread
-			for _, st := range steps {
-				extractLSCalls(st, func(name string, args []any) {
-					if name == "updateOrInsertThread" || name == "deleteThenInsertThread" {
-						cleaned := make([]any, len(args))
-						for i, a := range args {
-							cleaned[i] = cleanLSArg(a)
-						}
-						if len(cleaned) > 10 {
-							tid := safeLSString(cleaned[7])
-							if tid == "" {
-								return
-							}
-
-							updatedAt := safeLSString(cleaned[0])
-							var lastActivityTs int64
-							if ts, err := strconv.ParseInt(updatedAt, 10, 64); err == nil {
-								lastActivityTs = ts
-							}
-
-							folder := strings.ToLower(safeLSString(cleaned[10]))
-							if folder == "" {
-								folder = "inbox"
-							}
-
-							unread := 0
-							if len(cleaned) > 13 {
-								if n, ok := cleaned[13].(float64); ok {
-									unread = int(n)
-								} else if s, ok := cleaned[13].(string); ok {
-									if parsedUnread, err := strconv.Atoi(s); err == nil {
-										unread = parsedUnread
-									}
-								}
-							}
-
-							ttypeCode := safeLSString(cleaned[9])
-							isGroup := ttypeCode == "15" || ttypeCode == "2"
-							ttype := "user"
-							if isGroup {
-								ttype = "group"
-							}
-
-							avatar := ""
-							if len(cleaned) > 11 {
-								avatar = safeLSString(cleaned[11])
-							}
-
-							snippet := ""
-							if len(cleaned) > 40 {
-								snippet = safeLSString(cleaned[40])
-							}
-
-							creatorID := ""
-							if len(cleaned) > 21 {
-								creatorID = safeLSString(cleaned[21])
-							}
-
-							resolvedName := ""
-							if c, ok := contacts[creatorID]; ok && c.Name != "" {
-								resolvedName = c.Name
-							} else if c, ok := contacts[tid]; ok && c.Name != "" {
-								resolvedName = c.Name
-							} else if snippet != "" {
-								resolvedName = snippet
-							} else {
-								if isGroup {
-									resolvedName = "Grupo " + tid
-								} else {
-									resolvedName = "Chat " + tid
-								}
-							}
-
-							threads = append(threads, ThreadSummary{
-								ThreadID:       tid,
-								Name:           resolvedName,
-								IsGroup:        isGroup,
-								Type:           ttype,
-								Snippet:        snippet,
-								LastActivityTs: lastActivityTs,
-								UnreadCount:    unread,
-								Folder:         folder,
-								UpdatedAt:      updatedAt,
-								Avatar:         avatar,
-							})
-						}
-					}
-				})
+			tid := safeLSString(cleaned[7])
+			if tid == "" {
+				return
 			}
+			updatedAt := safeLSString(cleaned[0])
+			lastActivityTs, _ := strconv.ParseInt(updatedAt, 10, 64)
+			folder := strings.ToLower(safeLSString(cleaned[10]))
+			if folder == "" {
+				folder = "inbox"
+			}
+			unread := 0
+			if len(cleaned) > 89 {
+				unread, _ = strconv.Atoi(safeLSString(cleaned[89]))
+			}
+
+			typeCode, _ := strconv.Atoi(safeLSString(cleaned[9]))
+			isGroup := typeCode == 2 || typeCode == 16
+			isE2EE := typeCode == 15 || typeCode == 16
+			threadType := "user"
+			if isGroup {
+				threadType = "group"
+			}
+
+			avatar := safeLSString(cleaned[4])
+			if avatar == "" && len(cleaned) > 11 {
+				avatar = safeLSString(cleaned[11])
+			}
+			snippet := safeLSString(cleaned[2])
+			resolvedName := safeLSString(cleaned[3])
+			recipientID := ""
+			if typeCode == 15 {
+				recipientID = hybridRecipientByThread[tid]
+				if resolvedName == "" {
+					resolvedName = contacts[recipientID].Name
+				}
+				if avatar == "" {
+					avatar = contacts[recipientID].Avatar
+				}
+			}
+			if resolvedName == "" {
+				if contact, ok := contacts[tid]; ok {
+					resolvedName = contact.Name
+					if avatar == "" {
+						avatar = contact.Avatar
+					}
+				}
+			}
+			if resolvedName == "" && isGroup {
+				participantNames := make([]string, 0, len(participantsByThread[tid]))
+				seen := make(map[string]struct{})
+				for _, participantID := range participantsByThread[tid] {
+					participantName := strings.TrimSpace(contacts[participantID].Name)
+					if participantName == "" {
+						continue
+					}
+					if _, exists := seen[participantName]; exists {
+						continue
+					}
+					seen[participantName] = struct{}{}
+					participantNames = append(participantNames, participantName)
+				}
+				resolvedName = strings.Join(participantNames, ", ")
+			}
+
+			threads = append(threads, ThreadSummary{
+				ThreadID:       tid,
+				Name:           resolvedName,
+				IsGroup:        isGroup,
+				IsE2EE:         isE2EE,
+				RecipientID:    recipientID,
+				ChatJID:        recipientID,
+				ThreadTypeCode: typeCode,
+				Type:           threadType,
+				Snippet:        snippet,
+				LastActivityTs: lastActivityTs,
+				UnreadCount:    unread,
+				Folder:         folder,
+				UpdatedAt:      updatedAt,
+				Avatar:         avatar,
+			})
 		})
 	}
 

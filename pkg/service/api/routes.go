@@ -9,6 +9,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 
+	coreauth "github.com/bradez-rd/fbreego/pkg/core/auth"
 	coreconfig "github.com/bradez-rd/fbreego/pkg/core/config"
 	"github.com/bradez-rd/fbreego/pkg/service/traffic"
 	"github.com/bradez-rd/fbreego/web"
@@ -61,10 +62,37 @@ func (s *Server) Routes() http.Handler {
 
 		// Información y diagnóstico de la aplicación
 		pr.Get("/api/v1/app/info", func(w http.ResponseWriter, r *http.Request) {
-			auth := currentAuthConfiguration()
+			apiAuth := currentAuthConfiguration()
 			storageType := "memory"
 			if s.Registry != nil && s.Registry.HasEncryptedStorage() {
 				storageType = "encrypted"
+			}
+			capabilities := []string{
+				"sessions",
+				"session-validation",
+				"cookie-session-auth",
+				"global-webhook-config",
+				"webhook-dispatcher",
+				"websocket-events",
+				"media-upload",
+				"media-send",
+				"threads",
+				"text-messages",
+				"reactions",
+				"unsend",
+				"user-info",
+				"search",
+				"blocking",
+				"marketplace-read",
+				"marketplace-search",
+				"marketplace-publish",
+				"marketplace-delete",
+				"traffic-inspection",
+			}
+			credentialStatus := "disabled"
+			if coreauth.FB4ALoginEnabled() {
+				credentialStatus = "supported"
+				capabilities = append(capabilities, "credential-login")
 			}
 			JSONSuccess(w, "App info retrieved.", map[string]any{
 				"service":        ServiceName,
@@ -72,34 +100,25 @@ func (s *Server) Routes() http.Handler {
 				"apiVersion":     "v1",
 				"sessionStorage": storageType,
 				"auth": map[string]any{
-					"required":   auth.Required,
-					"configured": auth.Configured,
+					"required":   apiAuth.Required,
+					"configured": apiAuth.Configured,
 				},
 				"bridge": map[string]any{
 					"ready": s.ListenerManager != nil,
 				},
-				"capabilities": []string{
-					"sessions",
-					"session-validation",
-					"global-webhook-config",
-					"webhook-dispatcher",
-					"websocket-events",
-					"media-upload",
-					"media-send",
-					"threads",
-					"text-messages",
-					"reactions",
-					"unsend",
-					"user-info",
-					"search",
-					"blocking",
-					"marketplace-read",
-					"marketplace-search",
-					"marketplace-publish",
-					"marketplace-delete",
-					"traffic-inspection",
-				},
+				"capabilities": capabilities,
 				"capabilityMatrix": map[string]any{
+					"auth.cookies": map[string]any{
+						"status":      "supported",
+						"enabled":     true,
+						"description": "Create sessions from imported Facebook cookies",
+					},
+					"auth.credentials": map[string]any{
+						"status":      credentialStatus,
+						"enabled":     coreauth.FB4ALoginEnabled(),
+						"errorCode":   "FB4A_LOGIN_DISABLED",
+						"description": "Unofficial FB4A credential login is disabled by policy F-03 unless explicitly authorized",
+					},
 					"messenger.send": map[string]string{
 						"status":      "supported",
 						"description": "Send text & replies to users and groups",

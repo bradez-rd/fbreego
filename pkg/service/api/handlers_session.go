@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,6 +21,21 @@ import (
 	"github.com/bradez-rd/fbreego/pkg/messaging/listener"
 	"github.com/bradez-rd/fbreego/pkg/service/sessions"
 )
+
+func writeFB4ALoginDisabled(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, auth.ErrFB4ALoginDisabled) {
+		return false
+	}
+	JSONError(
+		w,
+		"FB4A_LOGIN_DISABLED",
+		"El login de Facebook mediante usuario y contraseña no está disponible; crea la sesión importando cookies válidas.",
+		http.StatusNotImplemented,
+		map[string]any{"supportedAuthMethod": "cookies", "policy": "F-03"},
+		"",
+	)
+	return true
+}
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	tenantID := extractTenantID(r)
@@ -56,6 +72,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if len(input.Cookies) == 0 && input.Email != "" && input.Password != "" {
 		payload, err := auth.FB4ALogin(r.Context(), s.httpClient, input.Email, input.Password, input.TOTPKey)
 		if err != nil {
+			if writeFB4ALoginDisabled(w, err) {
+				return
+			}
 			if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
 				JSONResponse(w, http.StatusForbidden, types.ServiceResponse{
 					Code:    "2FA_CHALLENGE_REQUIRED",
@@ -121,6 +140,9 @@ func (s *Server) handleLoginSession(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, identifier, input.Password, input.TOTPKey)
 	if err != nil {
+		if writeFB4ALoginDisabled(w, err) {
+			return
+		}
 		if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
 			JSONResponse(w, http.StatusForbidden, types.ServiceResponse{
 				Code:    "2FA_CHALLENGE_REQUIRED",
@@ -195,6 +217,9 @@ func (s *Server) handleCredentialsLogin(w http.ResponseWriter, r *http.Request) 
 
 	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, username, password, input.TOTPKey)
 	if err != nil {
+		if writeFB4ALoginDisabled(w, err) {
+			return
+		}
 		if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
 			b := make([]byte, 16)
 			_, _ = rand.Read(b)
@@ -290,6 +315,9 @@ func (s *Server) handleCompleteTwoFactor(w http.ResponseWriter, r *http.Request)
 
 	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, chal.Username, chal.Password, code)
 	if err != nil {
+		if writeFB4ALoginDisabled(w, err) {
+			return
+		}
 		JSONError(w, "2FA_VERIFICATION_FAILED", fmt.Sprintf("Error al verificar código 2FA: %v", err), http.StatusBadRequest, nil, "")
 		return
 	}
@@ -340,6 +368,9 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := auth.FB4ALogin(r.Context(), s.httpClient, input.Email, input.Password, input.TOTPKey)
 	if err != nil {
+		if writeFB4ALoginDisabled(w, err) {
+			return
+		}
 		if challengeErr, ok := err.(*types.TwoFactorChallengeError); ok {
 			JSONResponse(w, http.StatusForbidden, types.ServiceResponse{
 				Code:    "2FA_CHALLENGE_REQUIRED",
@@ -661,24 +692,19 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 		cookieHeader = rec.ProviderData.CookieFacebook
 	}
 
-	var items []map[string]any = make([]map[string]any, 0)
-	var fetchErr error
+	items := make([]map[string]any, 0)
+	var primaryErr error
 
 	threadsData, err := thread.FetchAllThreads(r.Context(), s.httpClient, rec.ProviderData)
 	if err == nil {
 		items = thread.ExtractThreadItems(threadsData)
-		if len(items) > 0 {
-			JSONSuccess(w, "Threads retrieved successfully.", map[string]any{
-				"items": items,
-				"count": len(items),
-			}, http.StatusOK)
-			return
-		}
 	} else {
-		fetchErr = err
+		primaryErr = err
 	}
 
-	// Fallback con LightSpeed HTML parser
+	// GraphQL and LightSpeed are complementary sources. Marketplace threads can
+	// coexist with modern/E2EE LightSpeed threads, so neither source suppresses
+	// the other merely because it returned at least one row.
 	lsThreads, _, fallbackErr := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, cookieHeader)
 	if fallbackErr == nil && len(lsThreads) > 0 {
 		fallbackItems := make([]map[string]any, 0, len(lsThreads))
@@ -692,34 +718,84 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			fallbackItems = append(fallbackItems, map[string]any{
-				"threadId":    t.ThreadID,
-				"name":        t.Name,
-				"type":        threadType,
-				"unreadCount": t.UnreadCount,
-				"updatedAt":   t.UpdatedAt,
-				"folder":      t.Folder,
-				"snippet":     t.Snippet,
-				"avatarUrl":   t.Avatar,
+				"threadId":       t.ThreadID,
+				"name":           t.Name,
+				"type":           threadType,
+				"unreadCount":    t.UnreadCount,
+				"updatedAt":      t.UpdatedAt,
+				"folder":         t.Folder,
+				"snippet":        t.Snippet,
+				"avatarUrl":      t.Avatar,
+				"recipientId":    t.RecipientID,
+				"chatJid":        t.ChatJID,
+				"isE2EE":         t.IsE2EE,
+				"threadTypeCode": t.ThreadTypeCode,
 			})
 		}
-		JSONSuccess(w, "Threads retrieved via LightSpeed fallback.", map[string]any{
-			"items": fallbackItems,
-			"count": len(fallbackItems),
-		}, http.StatusOK)
-		return
+		items = mergeThreadItems(items, fallbackItems)
 	}
 
-	// Si GraphQL batch tuvo exito con 0 threads y LightSpeed tampoco trajo hilos pero no fallo
-	if err == nil {
+	if primaryErr == nil || fallbackErr == nil {
 		JSONSuccess(w, "Threads retrieved successfully.", map[string]any{
-			"items": make([]map[string]any, 0),
-			"count": 0,
+			"items": items,
+			"count": len(items),
 		}, http.StatusOK)
 		return
 	}
 
-	s.RecordAudit("thread_fetch_failed", fmt.Sprintf("primary: %v; fallback: %v", fetchErr, fallbackErr), sessionID)
-	JSONError(w, "THREADS_FETCH_FAILED", fmt.Sprintf("Unable to retrieve threads from Facebook: %v", fetchErr), http.StatusBadGateway, nil, "")
+	s.RecordAudit("thread_fetch_failed", fmt.Sprintf("primary: %v; fallback: %v", primaryErr, fallbackErr), sessionID)
+	JSONError(w, "THREADS_FETCH_FAILED", fmt.Sprintf("Unable to retrieve threads from Facebook: %v", primaryErr), http.StatusBadGateway, nil, "")
+}
+
+func mergeThreadItems(primary, secondary []map[string]any) []map[string]any {
+	merged := make([]map[string]any, 0, len(primary)+len(secondary))
+	byID := make(map[string]map[string]any, len(primary)+len(secondary))
+	for _, item := range primary {
+		copyItem := make(map[string]any, len(item))
+		for key, value := range item {
+			copyItem[key] = value
+		}
+		merged = append(merged, copyItem)
+		if id := strings.TrimSpace(fmt.Sprint(copyItem["threadId"])); id != "" {
+			byID[id] = copyItem
+		}
+	}
+	for _, item := range secondary {
+		id := strings.TrimSpace(fmt.Sprint(item["threadId"]))
+		if current, exists := byID[id]; exists && id != "" {
+			for key, value := range item {
+				if key == "threadId" {
+					continue
+				}
+				currentValue, hasValue := current[key]
+				if !hasValue || isEmptyThreadField(currentValue) || key == "recipientId" || key == "chatJid" || key == "isE2EE" || key == "threadTypeCode" {
+					if !isEmptyThreadField(value) {
+						current[key] = value
+					}
+				}
+			}
+			continue
+		}
+		copyItem := make(map[string]any, len(item))
+		for key, value := range item {
+			copyItem[key] = value
+		}
+		merged = append(merged, copyItem)
+		if id != "" {
+			byID[id] = copyItem
+		}
+	}
+	return merged
+}
+
+func isEmptyThreadField(value any) bool {
+	if value == nil {
+		return true
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text) == ""
+	}
+	return false
 }
 
 // handleListContacts obtiene la lista de contactos conocidos de la sesion a traves de LightSpeed o perfil.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/bradez-rd/fbreego/pkg/core/types"
 	"github.com/bradez-rd/fbreego/pkg/service/dispatcher"
 	"github.com/bradez-rd/fbreego/pkg/service/events"
 	"github.com/bradez-rd/fbreego/pkg/service/media"
@@ -320,6 +321,14 @@ func TestUIPortalAPISchemaCompatibility(t *testing.T) {
 	if !ok || receive["status"] != "supported" {
 		t.Fatalf("app/info must advertise realtime receive support: %v", matrix["messenger.receive"])
 	}
+	credentialAuth, ok := matrix["auth.credentials"].(map[string]any)
+	if !ok || credentialAuth["status"] != "disabled" || credentialAuth["enabled"] != false {
+		t.Fatalf("app/info must expose the effective FB4A policy: %v", matrix["auth.credentials"])
+	}
+	cookieAuth, ok := matrix["auth.cookies"].(map[string]any)
+	if !ok || cookieAuth["status"] != "supported" || cookieAuth["enabled"] != true {
+		t.Fatalf("app/info must advertise cookie session auth: %v", matrix["auth.cookies"])
+	}
 
 	// 2. Verify /api/v1/app/status has required UI keys
 	reqStatus := httptest.NewRequest("GET", "/api/v1/app/status", nil)
@@ -578,6 +587,47 @@ func TestCredentialsLoginValidation(t *testing.T) {
 
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("cuerpo vacío debió retornar 422, retornó %d", w.Code)
+	}
+}
+
+func TestCredentialsLoginReportsPolicyBlockBeforeTransport(t *testing.T) {
+	t.Setenv("FBREEGO_API_AUTH_REQUIRED", "0")
+	t.Setenv("FBCHAT_ENABLE_UNOFFICIAL_FB4A", "0")
+	_, handler := setupTestServer(t)
+
+	req := httptest.NewRequest("POST", "/api/v1/sessions/auth/credentials", strings.NewReader(`{"username":"authorized-test","password":"not-sent"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("disabled FB4A must return 501, got %d: %s", w.Code, w.Body.String())
+	}
+	var response types.ServiceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.Code != "FB4A_LOGIN_DISABLED" {
+		t.Fatalf("unexpected error code: %q", response.Code)
+	}
+}
+
+func TestMergeThreadItemsCombinesGraphQLAndLightSpeed(t *testing.T) {
+	primary := []map[string]any{
+		{"threadId": "marketplace_1", "name": "Publicación", "type": "marketplace"},
+		{"threadId": "hybrid_1", "name": "", "type": "user"},
+	}
+	secondary := []map[string]any{
+		{"threadId": "hybrid_1", "name": "Contacto real", "type": "user", "recipientId": "recipient_1", "isE2EE": true, "threadTypeCode": 15},
+		{"threadId": "direct_2", "name": "Otra persona", "type": "user"},
+	}
+
+	merged := mergeThreadItems(primary, secondary)
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 unique threads, got %d: %+v", len(merged), merged)
+	}
+	if merged[1]["name"] != "Contacto real" || merged[1]["recipientId"] != "recipient_1" || merged[1]["isE2EE"] != true {
+		t.Fatalf("LightSpeed metadata was not merged into the GraphQL row: %+v", merged[1])
 	}
 }
 

@@ -36,9 +36,9 @@ func OpenAPISchema() map[string]any {
 		"/api/v1/sessions/{sessionId}/listen/start":                 pathOps("post", operation("Start Messenger realtime listener")),
 		"/api/v1/sessions/{sessionId}/listen/stop":                  pathOps("post", operation("Stop session listener")),
 		"/api/v1/sessions/{sessionId}/listen/status":                pathOps("get", operation("Get listener status")),
-		"/api/v1/sessions/{sessionId}/threads":                      pathOps("get", operation("List conversation threads")),
+		"/api/v1/sessions/{sessionId}/threads":                      pathOps("get", threadListOperation()),
 		"/api/v1/sessions/{sessionId}/contacts":                     pathOps("get", operation("List known session contacts")),
-		"/api/v1/sessions/{sessionId}/threads/{threadId}/messages":  pathOps("get", operation("Get thread message history")),
+		"/api/v1/sessions/{sessionId}/threads/{threadId}/messages":  pathOps("get", threadMessagesOperation()),
 		"/api/v1/sessions/{sessionId}/threads/{threadId}/read":      pathOps("post", operation("Mark thread as read")),
 		"/api/v1/sessions/{sessionId}/threads/{threadId}/delivered": pathOps("post", operation("Mark thread as delivered")),
 		"/api/v1/sessions/{sessionId}/threads/{threadId}/typing":    pathOps("post", operation("Send typing indicator")),
@@ -100,6 +100,33 @@ func operation(summary string) map[string]any {
 			"503": map[string]any{"description": "Required service configuration is missing"},
 		},
 	}
+}
+
+func paginationParameter(name, description string) map[string]any {
+	return map[string]any{
+		"in": "query", "name": name, "required": false,
+		"description": description, "schema": map[string]any{"type": "string"},
+	}
+}
+
+func threadListOperation() map[string]any {
+	op := operation("List a page of conversation threads")
+	op["description"] = "The first page merges a LightSpeed snapshot with GraphQL results. Subsequent cursor pages use GraphQL only. The cursor is the oldest updated_time_precise timestamp in milliseconds. hasMore is null when the provider did not expose reliable page_info; coverage=available_page does not guarantee all Messenger threads were discovered."
+	op["parameters"] = []any{
+		paginationParameter("cursor", "Millisecond timestamp returned as nextCursor by the previous page."),
+		paginationParameter("limit", "GraphQL page size, 1 to 100; default 50."),
+	}
+	return op
+}
+
+func threadMessagesOperation() map[string]any {
+	op := operation("Get a page of thread message history")
+	op["description"] = "Pass nextBefore as before to request older messages. hasMore is null when the provider does not expose reliable page_info; nextBefore may be derived from the oldest returned timestamp and does not guarantee another page."
+	op["parameters"] = []any{
+		paginationParameter("before", "Cursor or timestamp returned as nextBefore."),
+		paginationParameter("limit", "Message page size, 1 to 100; default 20."),
+	}
+	return op
 }
 
 func publicOperation(summary string) map[string]any {

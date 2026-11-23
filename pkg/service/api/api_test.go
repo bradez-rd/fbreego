@@ -476,6 +476,60 @@ func TestCrossTenantAccessForbidden(t *testing.T) {
 	}
 }
 
+func TestHistoryEndpointsRejectCrossTenantSession(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	srv, handler := setupTestServer(t)
+	srv.Registry.RegisterRecord(&sessions.SessionRecord{
+		SessionID:  "session-tenant-alpha-history",
+		TenantID:   "tenant-alpha",
+		Status:     sessions.StatusActive,
+		FacebookID: "10001",
+		CreatedAt:  sessions.UTCNow(),
+	})
+	for _, path := range []string{
+		"/api/v1/sessions/session-tenant-alpha-history/threads",
+		"/api/v1/sessions/session-tenant-alpha-history/threads/thread-1/messages",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("X-Tenant-ID", "tenant-beta")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("%s returned %d, want 403", path, response.Code)
+		}
+	}
+}
+
+func TestHistoryEndpointsLimitHandling(t *testing.T) {
+	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
+	srv, handler := setupTestServer(t)
+	srv.Registry.RegisterRecord(&sessions.SessionRecord{
+		SessionID:    "session-limit-test",
+		Status:       sessions.StatusActive,
+		FacebookID:   "10001",
+		ProviderData: &types.DataFB{},
+		CreatedAt:    sessions.UTCNow(),
+	})
+
+	// When limit is non-numeric, it must return 400 INVALID_LIMIT
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/session-limit-test/threads?limit=abc", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "INVALID_LIMIT") {
+		t.Fatalf("expected 400 INVALID_LIMIT for non-numeric limit, got %d %s", w.Code, w.Body.String())
+	}
+
+	// When limit is missing, undefined, 0, or exceeds 100, it should not fail with 400 INVALID_LIMIT
+	for _, query := range []string{"", "?limit=0", "?limit=undefined", "?limit=500"} {
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/sessions/session-limit-test/threads"+query, nil)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if strings.Contains(w.Body.String(), "INVALID_LIMIT") {
+			t.Fatalf("query %q triggered INVALID_LIMIT unexpectedly: %s", query, w.Body.String())
+		}
+	}
+}
+
 func TestDecodeJSONBodyRejectsUnknownFields(t *testing.T) {
 	t.Setenv("FBCHAT_API_AUTH_REQUIRED", "0")
 	_, handler := setupTestServer(t)

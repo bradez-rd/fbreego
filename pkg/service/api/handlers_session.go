@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -686,6 +687,32 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, "SESSION_NOT_VALIDATED", "Session does not have provider data.", http.StatusBadRequest, nil, "")
 		return
 	}
+	limit := 50
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" && value != "undefined" && value != "null" {
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			JSONError(w, "INVALID_LIMIT", "limit must be an integer between 1 and 100.", http.StatusBadRequest, nil, "")
+			return
+		}
+		if parsed <= 0 {
+			limit = 50
+		} else if parsed > 100 {
+			limit = 100
+		} else {
+			limit = parsed
+		}
+	}
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	if cursor == "undefined" || cursor == "null" {
+		cursor = ""
+	}
+	if cursor != "" {
+		parsed, parseErr := strconv.ParseInt(cursor, 10, 64)
+		if parseErr != nil || parsed <= 0 {
+			JSONError(w, "INVALID_CURSOR", "cursor must be a positive millisecond timestamp.", http.StatusBadRequest, nil, "")
+			return
+		}
+	}
 
 	cookieHeader := rec.BuildCookieHeader()
 	if cookieHeader == "" && rec.ProviderData != nil {
@@ -695,50 +722,68 @@ func (s *Server) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0)
 	var primaryErr error
 
-	threadsData, err := thread.FetchAllThreads(r.Context(), s.httpClient, rec.ProviderData)
+	threadsData, err := thread.FetchThreadPage(r.Context(), s.httpClient, rec.ProviderData, limit, cursor)
+	var hasMore *bool
+	var nextCursor string
 	if err == nil {
 		items = thread.ExtractThreadItems(threadsData)
+		hasMore, nextCursor = thread.ThreadPageInfo(threadsData, limit)
+		if nextCursor != "" && nextCursor == cursor {
+			hasMore = nil
+			nextCursor = ""
+		}
 	} else {
 		primaryErr = err
+	}
+	if cursor != "" && primaryErr != nil {
+		JSONError(w, "THREADS_FETCH_FAILED", primaryErr.Error(), http.StatusBadGateway, nil, "")
+		return
 	}
 
 	// GraphQL and LightSpeed are complementary sources. Marketplace threads can
 	// coexist with modern/E2EE LightSpeed threads, so neither source suppresses
 	// the other merely because it returned at least one row.
-	lsThreads, _, fallbackErr := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, cookieHeader)
-	if fallbackErr == nil && len(lsThreads) > 0 {
-		fallbackItems := make([]map[string]any, 0, len(lsThreads))
-		for _, t := range lsThreads {
-			threadType := t.Type
-			if threadType == "" {
-				if t.IsGroup {
-					threadType = "group"
-				} else {
-					threadType = "user"
+	var fallbackErr error
+	if cursor == "" {
+		lsThreads, _, fetchErr := lightspeed.FetchLightSpeedData(r.Context(), s.httpClient, cookieHeader)
+		fallbackErr = fetchErr
+		if fallbackErr == nil && len(lsThreads) > 0 {
+			fallbackItems := make([]map[string]any, 0, len(lsThreads))
+			for _, t := range lsThreads {
+				threadType := t.Type
+				if threadType == "" {
+					if t.IsGroup {
+						threadType = "group"
+					} else {
+						threadType = "user"
+					}
 				}
+				fallbackItems = append(fallbackItems, map[string]any{
+					"threadId":       t.ThreadID,
+					"name":           t.Name,
+					"type":           threadType,
+					"unreadCount":    t.UnreadCount,
+					"updatedAt":      t.UpdatedAt,
+					"folder":         t.Folder,
+					"snippet":        t.Snippet,
+					"avatarUrl":      t.Avatar,
+					"recipientId":    t.RecipientID,
+					"chatJid":        t.ChatJID,
+					"isE2EE":         t.IsE2EE,
+					"threadTypeCode": t.ThreadTypeCode,
+				})
 			}
-			fallbackItems = append(fallbackItems, map[string]any{
-				"threadId":       t.ThreadID,
-				"name":           t.Name,
-				"type":           threadType,
-				"unreadCount":    t.UnreadCount,
-				"updatedAt":      t.UpdatedAt,
-				"folder":         t.Folder,
-				"snippet":        t.Snippet,
-				"avatarUrl":      t.Avatar,
-				"recipientId":    t.RecipientID,
-				"chatJid":        t.ChatJID,
-				"isE2EE":         t.IsE2EE,
-				"threadTypeCode": t.ThreadTypeCode,
-			})
+			items = mergeThreadItems(items, fallbackItems)
 		}
-		items = mergeThreadItems(items, fallbackItems)
 	}
 
 	if primaryErr == nil || fallbackErr == nil {
 		JSONSuccess(w, "Threads retrieved successfully.", map[string]any{
-			"items": items,
-			"count": len(items),
+			"items":      items,
+			"count":      len(items),
+			"hasMore":    hasMore,
+			"nextCursor": nextCursor,
+			"coverage":   "available_page",
 		}, http.StatusOK)
 		return
 	}

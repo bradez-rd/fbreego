@@ -28,8 +28,21 @@ type ThreadMessage struct {
 	IsFromMe    bool             `json:"isFromMe"`
 }
 
+type ThreadMessagePage struct {
+	Items      []ThreadMessage
+	HasMore    *bool
+	NextBefore string
+}
+
 // FetchThreadMessages consulta el historial de mensajes de un hilo mediante MessengerGraphQLThreadFetcher.
 func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.DataFB, threadID string, limit int, before string) ([]ThreadMessage, error) {
+	page, err := FetchThreadMessagesPage(ctx, client, fb, threadID, limit, before)
+	return page.Items, err
+}
+
+// FetchThreadMessagesPage conserva el indicador de paginación si Facebook lo entrega.
+func FetchThreadMessagesPage(ctx context.Context, client *http.Client, fb *types.DataFB, threadID string, limit int, before string) (ThreadMessagePage, error) {
+	var page ThreadMessagePage
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -51,7 +64,7 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 
 	queryParamsJSON, err := json.Marshal(queryParams)
 	if err != nil {
-		return nil, fmt.Errorf("error serializando queryParams: %w", err)
+		return page, fmt.Errorf("error serializando queryParams: %w", err)
 	}
 
 	queries := fmt.Sprintf(`{"o0":{"doc_id":"3449967031715030","query_params":%s}}`, string(queryParamsJSON))
@@ -68,7 +81,7 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 
 	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 
 	headers := utils.DefaultHeaders("www.facebook.com")
@@ -80,24 +93,24 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error de red al consultar mensajes de hilo: %w", err)
+		return page, fmt.Errorf("error de red al consultar mensajes de hilo: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if err := httputil.CheckHTTPResponse(resp); err != nil {
-		return nil, err
+		return page, err
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return page, err
 	}
 
 	parsed, err := utils.ParseGraphQLBatchResponse(bodyBytes)
 	if err != nil {
 		parsed, err = utils.ParseFacebookJSON(bodyBytes, true)
 		if err != nil {
-			return nil, err
+			return page, err
 		}
 	}
 
@@ -107,6 +120,17 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 		if data, ok := o0["data"].(map[string]any); ok {
 			if threadObj, ok := data["message_thread"].(map[string]any); ok {
 				if msgsObj, ok := threadObj["messages"].(map[string]any); ok {
+					if pageInfo, ok := msgsObj["page_info"].(map[string]any); ok {
+						if more, ok := pageInfo["has_next_page"].(bool); ok {
+							page.HasMore = &more
+							if more {
+								page.NextBefore, _ = pageInfo["end_cursor"].(string)
+								if page.NextBefore == "" {
+									page.HasMore = nil
+								}
+							}
+						}
+					}
 					if nodes, ok := msgsObj["nodes"].([]any); ok {
 						for _, n := range nodes {
 							if node, ok := n.(map[string]any); ok {
@@ -122,7 +146,26 @@ func FetchThreadMessages(ctx context.Context, client *http.Client, fb *types.Dat
 		}
 	}
 
-	return messages, nil
+	page.Items = messages
+	if page.NextBefore != "" && page.NextBefore == before {
+		page.HasMore = nil
+		page.NextBefore = ""
+	}
+	if page.HasMore == nil && len(messages) >= limit {
+		var oldest int64
+		for _, message := range messages {
+			if message.Timestamp > 0 && (oldest == 0 || message.Timestamp < oldest) {
+				oldest = message.Timestamp
+			}
+		}
+		if oldest > 0 {
+			candidate := strconv.FormatInt(oldest, 10)
+			if candidate != before {
+				page.NextBefore = candidate
+			}
+		}
+	}
+	return page, nil
 }
 
 func parseGraphQLMessageNode(node map[string]any, defaultThreadID, ownFacebookID string) ThreadMessage {

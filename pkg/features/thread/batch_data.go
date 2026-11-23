@@ -2,9 +2,11 @@ package thread
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/bradez-rd/fbreego/pkg/core/contracts"
@@ -19,6 +21,11 @@ const BatchQueryURL = contracts.DefaultBatchQueryURL
 
 // FetchAllThreads obtiene mediante una consulta GraphQLBatch la lista estructurada de conversaciones de la cuenta.
 func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB) (map[string]any, error) {
+	return FetchThreadPage(ctx, client, fb, 50, "")
+}
+
+// FetchThreadPage consulta una página GraphQL anterior a la marca temporal indicada.
+func FetchThreadPage(ctx context.Context, client *http.Client, fb *types.DataFB, limit int, before string) (map[string]any, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -27,10 +34,29 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 	if docID == "" {
 		docID = contracts.DefaultDocIDThreadList
 	}
-	queriesJSON := fmt.Sprintf(`{"o0":{"doc_id":"%s","query_params":{"limit":50,"before":null,"tags":["INBOX"],"includeDeliveryReceipts":false,"includeSeqID":true}}}`, docID)
+	var cursor any
+	if before != "" {
+		parsed, err := strconv.ParseInt(before, 10, 64)
+		if err != nil || parsed <= 0 {
+			return nil, fmt.Errorf("cursor de hilos inválido")
+		}
+		cursor = parsed
+	}
+	query, err := json.Marshal(map[string]any{
+		"o0": map[string]any{
+			"doc_id": docID,
+			"query_params": map[string]any{
+				"limit": limit, "before": cursor, "tags": []string{"INBOX"},
+				"includeDeliveryReceipts": false, "includeSeqID": true,
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	form := utils.BuildFormAll(fb, "", "", false)
-	form.Set("queries", queriesJSON)
+	form.Set("queries", string(query))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", contracts.BatchQueryURL(), strings.NewReader(form.Encode()))
 	if err != nil {
@@ -60,6 +86,59 @@ func FetchAllThreads(ctx context.Context, client *http.Client, fb *types.DataFB)
 	}
 
 	return utils.ParseGraphQLBatchResponse(bodyBytes)
+}
+
+// ThreadPageInfo devuelve nil para hasMore si Facebook no expone page_info.
+// El cursor de avance procede de updated_time_precise, usado por la consulta GraphQL.
+func ThreadPageInfo(threadsData map[string]any, limit int) (hasMore *bool, nextCursor string) {
+	mt := messageThreads(threadsData)
+	nodes, _ := mt["nodes"].([]any)
+	if len(nodes) > 0 {
+		var oldest int64
+		for _, raw := range nodes {
+			node, _ := raw.(map[string]any)
+			value, _ := node["updated_time_precise"].(string)
+			timestamp, err := strconv.ParseInt(value, 10, 64)
+			if err == nil && timestamp > 0 && (oldest == 0 || timestamp < oldest) {
+				oldest = timestamp
+			}
+		}
+		if oldest > 0 {
+			nextCursor = strconv.FormatInt(oldest, 10)
+		}
+	}
+	page, _ := mt["page_info"].(map[string]any)
+	if page == nil {
+		if len(nodes) >= limit && limit > 0 {
+			return nil, nextCursor
+		}
+		return nil, ""
+	}
+	more, ok := page["has_next_page"].(bool)
+	if !ok {
+		if len(nodes) >= limit && limit > 0 {
+			return nil, nextCursor
+		}
+		return nil, ""
+	}
+	if more {
+		if nextCursor == "" {
+			return nil, ""
+		}
+		return &more, nextCursor
+	}
+	return &more, ""
+}
+
+func messageThreads(threadsData map[string]any) map[string]any {
+	o0, _ := threadsData["o0"].(map[string]any)
+	if o0 == nil {
+		o0 = threadsData
+	}
+	data, _ := o0["data"].(map[string]any)
+	viewer, _ := data["viewer"].(map[string]any)
+	mt, _ := viewer["message_threads"].(map[string]any)
+	return mt
 }
 
 // ExtractThreadItems normaliza la respuesta cruda de GraphQL batch en una lista de hilos de fbreego.

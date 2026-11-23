@@ -28,6 +28,10 @@ La creación de sesiones utiliza cookies importadas de una sesión real. `/api/v
 
 El listado de conversaciones combina GraphQL batch y LightSpeed. Los tipos LightSpeed `2` y `16` son grupos; `15` es una conversación E2EE uno-a-uno y conserva tanto la clave operativa del hilo como el JID/destinatario resuelto por las tareas híbridas del proveedor.
 
+El endpoint `GET /api/v1/sessions/{sessionId}/threads` admite `limit` (1–100) y `cursor` (marca temporal en milisegundos del hilo más antiguo de la página anterior). La primera página combina GraphQL con una instantánea LightSpeed; las páginas con `cursor` avanzan solo por GraphQL. La respuesta añade `hasMore` (`true`, `false` o `null`), `nextCursor` y `coverage: "available_page"`. `null` significa que la plataforma no entregó información suficiente para confirmar el final; aun con `false`, la fuente LightSpeed no garantiza enumeración exhaustiva de todos los hilos.
+
+`GET /api/v1/sessions/{sessionId}/threads/{threadId}/messages` admite `before` y `limit` (1–100), y devuelve `hasMore` y `nextBefore`. Si GraphQL no entrega `page_info`, `hasMore` permanece `null`; una página llena puede ofrecer como `nextBefore` la marca temporal del mensaje más antiguo para intentar avanzar, sin prometer que existe otra página. Los consumidores deben guardar el cursor, deduplicar por ID y detenerse ante un cursor repetido o ausencia de avance.
+
 ## Requisitos y compilación
 
 - Go 1.27.2 o la versión compatible indicada en `go.mod`.

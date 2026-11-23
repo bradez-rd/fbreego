@@ -278,8 +278,12 @@ func (s *Server) handleSendMediaMessage(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetThreadMessages(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	threadID := chi.URLParam(r, "threadId")
-	rec, err := s.Registry.Get(sessionID)
+	rec, err := s.Registry.GetForTenant(sessionID, extractTenantID(r))
 	if err != nil {
+		if strings.Contains(err.Error(), "acceso denegado") {
+			JSONError(w, "FORBIDDEN", "Cross-tenant access is not allowed.", http.StatusForbidden, nil, "")
+			return
+		}
 		JSONError(w, "SESSION_NOT_FOUND", "Session not found.", http.StatusNotFound, nil, "")
 		return
 	}
@@ -289,14 +293,30 @@ func (s *Server) handleGetThreadMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	limit := 20
-	if lStr := r.URL.Query().Get("limit"); lStr != "" {
-		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
-			limit = l
+	if lStr := strings.TrimSpace(r.URL.Query().Get("limit")); lStr != "" && lStr != "undefined" && lStr != "null" {
+		parsed, parseErr := strconv.Atoi(lStr)
+		if parseErr != nil {
+			JSONError(w, "INVALID_LIMIT", "limit must be an integer between 1 and 100.", http.StatusBadRequest, nil, "")
+			return
+		}
+		if parsed <= 0 {
+			limit = 20
+		} else if parsed > 100 {
+			limit = 100
+		} else {
+			limit = parsed
 		}
 	}
-	before := r.URL.Query().Get("before")
+	before := strings.TrimSpace(r.URL.Query().Get("before"))
+	if before == "undefined" || before == "null" {
+		before = ""
+	}
+	if len(before) > 2048 {
+		JSONError(w, "INVALID_CURSOR", "before is too long.", http.StatusBadRequest, nil, "")
+		return
+	}
 
-	msgs, err := thread.FetchThreadMessages(r.Context(), s.httpClient, rec.ProviderData, threadID, limit, before)
+	page, err := thread.FetchThreadMessagesPage(r.Context(), s.httpClient, rec.ProviderData, threadID, limit, before)
 	if err != nil {
 		JSONError(w, "FETCH_MESSAGES_FAILED", err.Error(), http.StatusInternalServerError, nil, "")
 		return
@@ -304,9 +324,11 @@ func (s *Server) handleGetThreadMessages(w http.ResponseWriter, r *http.Request)
 
 	s.Registry.RecordActivity(sessionID)
 	JSONSuccess(w, "Thread messages retrieved.", map[string]any{
-		"items":    msgs,
-		"count":    len(msgs),
-		"threadId": threadID,
+		"items":      page.Items,
+		"count":      len(page.Items),
+		"threadId":   threadID,
+		"hasMore":    page.HasMore,
+		"nextBefore": page.NextBefore,
 	}, http.StatusOK)
 }
 

@@ -41,3 +41,6 @@ dist/
 .fbreego_media/
 .fbreego_cookies/
 .runtime/
+
+# Audits directory
+audits/

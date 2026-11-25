@@ -70,6 +70,8 @@ Variables relevantes:
 | `FBREEGO_ENABLE_E2E_TEST_ENDPOINT` | `false` | Expone la suite operativa `/api/v1/tests/e2e`; solo para entornos aislados. |
 | `FBREEGO_WEBHOOK_ALLOWED_TARGETS` | sin valor | Orígenes administrados exactos, separados por comas, que pueden recibir webhooks aun si usan red privada o puerto no estándar. SocialManager lo configura con su propio `MAIN_SERVICE_URL`; los demás destinos continúan bajo la política anti-SSRF. |
 
+La imagen Docker configura `FBREEGO_PORT=3004`, publica solo el puerto 3004 y verifica `/healthz` en ese mismo puerto. El valor 8000 de la tabla corresponde a la ejecución directa del binario sin variables de entorno.
+
 El proceso se niega a inicializar el almacenamiento persistente si falta `FBREEGO_SESSION_SECRET`. Los identificadores `tenantId` están restringidos a un segmento seguro de 1–64 caracteres.
 
 ## Uso de la API
